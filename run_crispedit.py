@@ -105,7 +105,7 @@ def get_arguments():
 
     # ── mylora 新参数
     parser.add_argument('--projection_method_lora', type=str, default=None,
-                        choices=["param","grad","both"],
+                        choices=["v2_param","v2_grad","v2"],
                         help="Projection onto the gradient or onto the parameters")
     parser.add_argument('--projection_method', type=str, default=None,
                         choices=["param","both"],
@@ -121,6 +121,10 @@ def get_hparams(args):
         hparams.batch_size = args.batch_size
         hparams.energy_threshold = args.energy_threshold
         hparams.mom2_n_samples = args.cache_sample_num
+        # 通过命令行参数修改rank
+        hparams.lora_rank = args.lora_rank
+        hparams.lora_alpha = args.lora_rank
+
         hparams.projection_method_lora = args.projection_method_lora
         #临时增加，修改rank
         hparams.lora_rank=args.lora_rank
@@ -243,18 +247,15 @@ if __name__ == "__main__":
     if args.sequential_edit:
         edited_model = execute_ft_sequential(model, tokenizer, requests, hparams,tracker = tracker)
     elif args.projection_method_lora is not None:
-        if args.projection_method_lora == "param":
+        if args.projection_method_lora == "v1_param":
             edited_model = execute_ft_param_lora(model, tokenizer, requests, hparams,tracker = tracker)
-        elif args.projection_method_lora == "grad":
+        elif args.projection_method_lora == "v1_grad":
             edited_model = execute_ft_grad_lora(model, tokenizer, requests, hparams,tracker = tracker)
-        elif args.projection_method_lora == "both":
+        elif args.projection_method_lora == "v2":
             edited_model = execute_ft_both_lora(model, tokenizer, requests, hparams,tracker = tracker)
     elif args.projection_method is not None:
         if args.projection_method == "param":
             edited_model = execute_crispedit_param(model, tokenizer, requests, hparams,tracker = tracker)
-        elif args.projection_method == "both":
-            ...
-
     else:
         edited_model = execute_ft(model, tokenizer, requests, hparams,tracker = tracker)
     print_time("End FT Time")

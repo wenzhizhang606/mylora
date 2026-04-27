@@ -23,7 +23,7 @@ from easyeditor.models.crispedit.utils import (
 
 from easyeditor.mymodels import (
     CrispLoRAHyperParams,
-    wrap_model_and_build_projected_optimizer,
+    apply_limit_grad_lora_to_model,
     build_lora_projection_cache,
     attach_curvature_lora_variant,
     apply_leaky_lora_to_model,
@@ -376,6 +376,9 @@ def execute_ft_grad_lora(
 ) -> AutoModelForCausalLM:
     # 对于梯度进行投影
     tracker = kwargs.get("tracker", None)
+    return apply_limit_grad_lora_to_model(model,tok,requests,hparams,tracker = tracker)
+    
+    '''
     device = model.device
 
     if tok.padding_side != "right":
@@ -444,7 +447,7 @@ def execute_ft_grad_lora(
     # 移除适配器结构，返回标准的 AutoModelForCausalLM。
     merged_model = peft_model.merge_and_unload()
     return merged_model
-
+    '''
 
 def execute_ft_param_lora(
     model: AutoModelForCausalLM,

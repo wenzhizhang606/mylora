@@ -39,7 +39,7 @@ class CrispLoRAHyperParams(HyperParams):
 
     # ── KFac统计配置 ─────────────────────────────────────────────────────────
     mom2_dataset: str = "wikipedia"
-    mom2_n_samples: int = 1000
+    mom2_n_samples: int = 10000
     mom2_dtype: str = "float32"
     energy_threshold: float = 0.5
 

@@ -19,7 +19,7 @@ from .limit_grad_lora import (
     build_lora_projection_cache,
     map_proj_cache_to_lora_params,
     wrap_model_and_build_projected_optimizer,
-    apply_scheme_a_to_model,
+    apply_limit_grad_lora_to_model,
     compute_marginal_masks,
     get_rank_and_threshold_by_energy_ratio,
 )
@@ -43,7 +43,7 @@ __all__ = [
     "build_lora_projection_cache",
     "map_proj_cache_to_lora_params",
     "wrap_model_and_build_projected_optimizer",
-    "apply_scheme_a_to_model",
+    "apply_limit_grad_lora_to_model",
     "compute_marginal_masks",
     "get_rank_and_threshold_by_energy_ratio",
     # 调整参数增量

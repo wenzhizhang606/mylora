@@ -14,10 +14,10 @@ lm_head_module: "lm_head"
 lora_type: "lora"
 lora_rank: 64
 lora_alpha: 64
-lora_dropout: 0
+lora_dropout: 0.05
 target_modules: ["down_proj"]
 
-num_steps: 25
+num_steps: 50
 lr: 5.0e-4
 weight_decay: 0
 batch_size: 32

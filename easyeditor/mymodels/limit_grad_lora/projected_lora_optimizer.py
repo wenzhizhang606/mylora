@@ -15,13 +15,6 @@ class ProjectedLoRAOptimizer(Adam):
         amsgrad: bool = False,
         projection_mode: str = "marginal_AB",
     ):
-        """
-        Args:
-            params: 待优化参数（仅LoRA参数）
-            projection_cache_map: 参数→投影缓存的映射
-            projection_mode: "marginal_A" | "marginal_B" | "marginal_AB"
-        """
-        # 先用空 cache 初始化父类，之后再填入预处理后的缓存
         defaults = dict(
             projection_cache_map={},
             projection_mode=projection_mode,
@@ -33,38 +26,52 @@ class ProjectedLoRAOptimizer(Adam):
         for group in self.param_groups:
             group.update(defaults)
 
-        # 预处理：将投影矩阵搬到参数所在设备并转为正确dtype，缓存起来
-        # 避免每次 step() 都重复做 CPU→GPU 的数据搬运
+        # 预加载：将投影矩阵搬到参数所在设备，避免每次 step 做 CPU→GPU 传输
+        # leak_rate_param 是 nn.Parameter，不做设备迁移（已在正确设备上）
         self._preload_cache(projection_cache_map)
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # 缓存管理
+    # ──────────────────────────────────────────────────────────────────────────
+
     def _preload_cache(self, projection_cache_map: Dict):
-        # 收集所有参数对象，建立 id→param 的映射
-        all_params = {}
+        """
+        将投影矩阵（Ua/Ub/mask_a/mask_b）提前搬到对应参数所在设备。
+        leak_rate_param 是 nn.Parameter，直接保留引用，无需额外迁移。
+
+        构建后写回每个 param_group["projection_cache_map"]。
+        """
+        # 建立 id(param) → param 的索引，用于跨 group 匹配
+        all_params: Dict[int, torch.nn.Parameter] = {}
         for group in self.param_groups:
             for p in group["params"]:
                 all_params[id(p)] = p
 
-        preloaded = {}
+        preloaded: Dict[torch.nn.Parameter, Dict] = {}
         for param, cache in projection_cache_map.items():
             if id(param) not in all_params:
                 continue
-            p = all_params[id(param)]
-            dev, dtype = p.device, p.dtype
+            p   = all_params[id(param)]
+            dev = p.device
+            dtype = p.dtype
 
-            new_cache = {"param_type": cache.get("param_type", "unknown")}
+            new_cache: Dict = {"param_type": cache.get("param_type", "unknown")}
 
+            # 投影矩阵：搬到 GPU 并转为参数同 dtype
             if "Ua" in cache:
-                new_cache["Ua"] = cache["Ua"].to(device=dev, dtype=dtype)
+                new_cache["Ua"]     = cache["Ua"].to(device=dev, dtype=dtype)
             if "mask_a" in cache:
                 new_cache["mask_a"] = cache["mask_a"].to(device=dev, dtype=dtype)
             if "Ub" in cache:
-                new_cache["Ub"] = cache["Ub"].to(device=dev, dtype=dtype)
+                new_cache["Ub"]     = cache["Ub"].to(device=dev, dtype=dtype)
             if "mask_b" in cache:
                 new_cache["mask_b"] = cache["mask_b"].to(device=dev, dtype=dtype)
 
+            # leak_rate_param：直接保留 nn.Parameter 引用（已在正确设备上）
+            new_cache["leak_rate_param"] = cache.get("leak_rate_param", None)
+
             preloaded[param] = new_cache
 
-        # 写回 param_groups
         for group in self.param_groups:
             group["projection_cache_map"] = preloaded
 
@@ -72,28 +79,36 @@ class ProjectedLoRAOptimizer(Adam):
 
     def reset_cache(self, new_projection_cache_map: Dict):
         """
-        更新投影缓存，并同步动量缓冲区到新的子空间。
-        在连续编辑场景下，每次更新投影后调用此方法。
-        重新触发预加载，保证矩阵始终在 GPU 上。
+        更新投影缓存，并将旧缓存对应的动量缓冲区同步到新子空间。
+        连续编辑场景下，每轮编辑前调用此方法。
+
+        流程：
+          1. 用旧 cache（已在 GPU）对已有动量做软投影对齐
+          2. 重新预加载新 cache
         """
-        # 先同步动量（用旧 cache 里已在 GPU 上的矩阵）
+        # step 1：动量缓冲区同步到旧子空间（防止旧动量污染新方向）
         for group in self.param_groups:
             old_cache_map = group.get("projection_cache_map", {})
+            mode = group.get("projection_mode", "marginal_AB")
             for p in group["params"]:
                 if p not in self.state or p not in old_cache_map:
                     continue
-                cache = old_cache_map[p]
                 state = self.state[p]
                 if "exp_avg" not in state:
                     continue
-                m = state["exp_avg"]
+                cache = old_cache_map[p]
                 param_type = cache.get("param_type", "unknown")
-                m_proj = self._project_grad(m, cache, param_type, group["projection_mode"])
+                m = state["exp_avg"]
+                m_proj = self._project_grad(m, cache, param_type, mode)
                 if m_proj is not None:
                     m.copy_(m_proj)
 
-        # 重新预加载新 cache
+        # step 2：重新预加载新 cache
         self._preload_cache(new_projection_cache_map)
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # 软投影核心
+    # ──────────────────────────────────────────────────────────────────────────
 
     def _project_grad(
         self,
@@ -102,34 +117,43 @@ class ProjectedLoRAOptimizer(Adam):
         param_type: str,
         mode: str,
     ) -> Optional[torch.Tensor]:
+        # ── 读取泄漏率（detach：仅读值，不影响计算图）──────────────────────────
+        leak_rate_param = cache.get("leak_rate_param", None)
+        # 如果没有泄露率，则退回到第一个版本
+        if leak_rate_param is not None:
+            leak = torch.sigmoid(leak_rate_param.detach().to(device=grad.device, dtype=grad.dtype)) * 0.2
+        else:
+            leak = torch.zeros(1, device=grad.device, dtype=grad.dtype)
+
         if param_type == "lora_A":
-            # lora_A shape: (r, d_in)
-            # 右投影：grad @ Ua → mask → @ Ua.T
-            # 等价于只保留 Ua 列中 mask_a=True 对应的低能量方向
+            # lora_A: (r, d_in)，对输入方向做右投影
             if mode not in ("marginal_A", "marginal_AB"):
                 return None
             if "Ua" not in cache or "mask_a" not in cache:
                 return None
-            Ua     = cache["Ua"]      # (d_in, d_in)，已在 GPU
-            mask_a = cache["mask_a"]  # (d_in,)，float，已在 GPU
-            grad_proj = (grad @ Ua) * mask_a.unsqueeze(0)  # (r, d_in)
-            grad_proj = grad_proj @ Ua.T                    # (r, d_in)
+
+            mask_a = cache["mask_a"]   # (d_in, k_in)，列为高曲率特征向量
+
+            grad_high = grad @ (mask_a @ mask_a.T)     
+            # 软屏蔽：低曲率方向保留全部梯度，高曲率方向仅保留 leak 比例
+            grad_proj = grad - (1.0 - leak) * grad_high
             return grad_proj
 
         elif param_type == "lora_B":
-            # lora_B shape: (d_out, r)
-            # 左投影：Ub.T @ grad → mask → Ub @
-            # 等价于只保留 Ub 列中 mask_b=True 对应的低能量方向
+            # lora_B: (d_out, r)，对输出方向做左投影
             if mode not in ("marginal_B", "marginal_AB"):
                 return None
             if "Ub" not in cache or "mask_b" not in cache:
                 return None
-            Ub     = cache["Ub"]      # (d_out, d_out)，已在 GPU
-            mask_b = cache["mask_b"]  # (d_out,)，float，已在 GPU
-            grad_in_basis = Ub.T @ grad                       # (d_out, r)
-            grad_masked   = grad_in_basis * mask_b.unsqueeze(1)  # (d_out, r)
-            grad_proj     = Ub @ grad_masked                  # (d_out, r)
+
+            mask_b = cache["mask_b"]   # (d_out, k_out)，列为高曲率特征向量
+
+            # grad: (d_out, r)，左乘投影矩阵
+            grad_high = (mask_b @ mask_b.T) @ grad          # (d_out, r)
+            # 软屏蔽：低曲率方向保留全部梯度，高曲率方向仅保留 leak 比例
+            grad_proj = grad - (1.0 - leak) * grad_high
             return grad_proj
+
         else:
             return None
 
@@ -142,9 +166,9 @@ class ProjectedLoRAOptimizer(Adam):
 
         for group in self.param_groups:
             cache_map = group.get("projection_cache_map", {})
-            mode = group.get("projection_mode", "marginal_AB")
+            mode      = group.get("projection_mode", "marginal_AB")
             if not cache_map:
-                print("cache_map is null!")
+                print("[ProjectedLoRAOptimizer] 警告：cache_map 为空，跳过梯度投影")
                 continue
 
             for p in group["params"]:
@@ -153,8 +177,10 @@ class ProjectedLoRAOptimizer(Adam):
                 if p not in cache_map:
                     continue
 
-                cache = cache_map[p]
+                cache      = cache_map[p]
                 param_type = cache.get("param_type", "unknown")
+
+                # 软投影梯度
                 grad_proj = self._project_grad(p.grad, cache, param_type, mode)
                 if grad_proj is not None:
                     p.grad.copy_(grad_proj)
