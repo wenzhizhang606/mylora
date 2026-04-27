@@ -15,7 +15,7 @@ from utils import (
 HF_CACHE_DIR = os.getenv("HF_CACHE_DIR")
 os.environ["HF_DATASETS_CACHE"] = os.getenv("HF_DATASETS_DIR")
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,2" 
+os.environ["CUDA_VISIBLE_DEVICES"] = "6,7" 
 
 import argparse
 import torch
@@ -47,7 +47,7 @@ def get_arguments():
                                  'safeedit_train', 'safeedit_test'])
     #new
     parser.add_argument('--alg_name', required=True, type=str, default='lora',
-                        choices=['crispedit','lora',"mylora"])
+                        choices=['crispedit','lora',"mylora",'crispedit_b_pro'])
     parser.add_argument('--cache_sample_num', type=int, default=10000,
                         help='Number of samples to use for caching projection matrices.')
     parser.add_argument('--edit_sample_num', type=int, default=1000,

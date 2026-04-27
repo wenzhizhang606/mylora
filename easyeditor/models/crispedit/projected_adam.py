@@ -44,29 +44,6 @@ class ProjectedAdam(Adam):
                 U_A = cache['Ua'].to(device=p.device, dtype=p.dtype)
                 U_B = cache['Ub'].to(device=p.device, dtype=p.dtype)
                 M   = cache['M'].to(device=p.device, dtype=p.dtype)
-                # zwz:临时修改代码
-                def get_topk_indices_by_energy_ratio(eigenvalues: torch.Tensor, percent: float = 0.9):
-    
-                    eigenvalues = torch.clamp(eigenvalues, min=0.0)
-
-                    sorted_eigvals, sorted_idx = torch.sort(eigenvalues, descending=True)
-                    total_energy = torch.sum(sorted_eigvals)
-
-                    if total_energy <= 0:
-                        return 0, sorted_idx[:0], torch.tensor(0.0, device=eigenvalues.device)
-
-                    cumulative_energy = torch.cumsum(sorted_eigvals, dim=0)
-                    energy_ratio = cumulative_energy / total_energy
-
-                    k = torch.searchsorted(energy_ratio, percent).item() + 1
-                    idx = sorted_idx[:k]
-                    threshold = sorted_eigvals[k - 1]
-
-                    return k, idx, threshold
-                k_in, idx_in, threshold_in = get_topk_indices_by_energy_ratio(Sa, percent=energy_threshold)
-                k_out, idx_out, threshold_out = get_topk_indices_by_energy_ratio(Sb, percent=energy_threshold)
-                Uin_high = U_A[:, idx_in].contiguous()
-                Uout_high = U_B[:, idx_out].contiguous()
                 state = self.state[p]
                 if 'exp_avg' in state:
                     m = state['exp_avg']
@@ -117,15 +94,21 @@ class ProjectedAdam(Adam):
                 
                 U_A = group['projection_cache_map'][p]['Ua'].to(device=grad.device, dtype=grad.dtype)
                 U_B = group['projection_cache_map'][p]['Ub'].to(device=grad.device, dtype=grad.dtype)
-                M = group['projection_cache_map'][p]['M'].to(device=grad.device, dtype=grad.dtype)
-                grad_proj = U_B @ ( (U_B.T @ grad @ U_A) * M.T ) @ U_A.T
-                
+                #M = group['projection_cache_map'][p]['M'].to(device=grad.device, dtype=grad.dtype)
+                #zwz:临时修改
+                #grad_proj = U_B @ ( (U_B.T @ grad @ U_A) * M.T ) @ U_A.T
+                I_out = torch.eye(U_B.shape[0],device=grad.device,dtype=grad.dtype)
+                I_in  = torch.eye(U_A.shape[0],device=grad.device,dtype=grad.dtype)
+                grad_proj = (I_out - U_B @ U_B.T) @ grad @(I_in - U_A @ U_A.T)
+
+                '''
                 if 'additional_projection_cache_map' in group and p in group['additional_projection_cache_map']:
                     U_A = group['additional_projection_cache_map'][p]['Ua'].to(device=grad.device, dtype=grad.dtype)
                     U_B = group['additional_projection_cache_map'][p]['Ub'].to(device=grad.device, dtype=grad.dtype)
                     M = group['additional_projection_cache_map'][p]['M'].to(device=grad.device, dtype=grad.dtype)
                     grad_proj = U_B @ ( (U_B.T @ grad_proj @ U_A) * M.T ) @ U_A.T
-
+                '''
+                #zwz:end
                 p.grad.copy_(grad_proj)
 
         return super().step(closure)

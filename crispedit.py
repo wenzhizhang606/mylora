@@ -41,6 +41,7 @@ def execute_ft(
     """
     Executes the FT update algorithm for the specified update at the specified layer
     """
+    print("进入执行函数")
     device = model.device
     tracker = kwargs.get("tracker", None)
     if tok.padding_side != "right":
