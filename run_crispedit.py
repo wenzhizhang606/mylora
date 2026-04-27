@@ -15,7 +15,7 @@ from utils import (
 HF_CACHE_DIR = os.getenv("HF_CACHE_DIR")
 os.environ["HF_DATASETS_CACHE"] = os.getenv("HF_DATASETS_DIR")
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,3" 
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2" 
 
 import argparse
 import torch
@@ -47,7 +47,7 @@ def get_arguments():
                                  'safeedit_train', 'safeedit_test'])
     #new
     parser.add_argument('--alg_name', required=True, type=str, default='lora',
-                        choices=['crispedit','lora',"mylora","myedit"])
+                        choices=['crispedit','lora',"mylora"])
     parser.add_argument('--cache_sample_num', type=int, default=10000,
                         help='Number of samples to use for caching projection matrices.')
     parser.add_argument('--edit_sample_num', type=int, default=1000,
@@ -108,7 +108,7 @@ def get_arguments():
                         choices=["param","grad","both"],
                         help="Projection onto the gradient or onto the parameters")
     parser.add_argument('--projection_method', type=str, default=None,
-                        choices=["param","grad","both"],
+                        choices=["param","both"],
                         help="Projection onto the gradient or onto the parameters")
     
     args = parser.parse_args()
@@ -185,7 +185,7 @@ def get_hparams(args):
 def calculate_model_name(args, hparams):
     if args.projection_method_lora is not None:
         alg = getattr(hparams, 'alg_name', args.projection_method_lora)
-        name = f"{args.model}_{args.projection_method_lora}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
+        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
     elif args.projection_method is not None:
         alg = getattr(hparams, 'alg_name', args.projection_method)
         name = f"{args.model}_{args.projection_method}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"

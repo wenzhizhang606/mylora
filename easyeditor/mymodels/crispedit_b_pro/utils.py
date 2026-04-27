@@ -33,8 +33,8 @@ def calculate_projection_cache_with_kfac(A, B, energy_threshold=0.9):
     rank, null_threshold = get_rank_and_threshold_by_energy_ratio(M.view(-1), percent=energy_threshold)
     M = M < null_threshold
     print(f"Rank is {rank} out of {A.shape[0]*B.shape[0]} total, null threshold: {null_threshold}")
-    #zwz:临时修改
-    return {'Ua': Ua, 'Sa':Sa,'Ub': Ub,'Sb':Sb, 'M': M}
+
+    return {'Ua': Ua, 'Ub': Ub, 'M': M}
 
 def get_cov_ab(
     model: AutoModelForCausalLM,

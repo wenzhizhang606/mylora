@@ -29,7 +29,7 @@ class LeakyCurvatureLora(LoraConfig):
         
         # 获取动态泄漏率，限制在 [0, max_leak] 之间，防止过大破坏预训练知识
         raw_leak = getattr(module, f"leak_rate_{active_adapter}")
-        leak = torch.sigmoid(raw_leak) * 0.1  # 最高只允许 10% 的高曲率信息泄漏
+        leak = torch.sigmoid(raw_leak) * 0.2  # todo:之后设置为超参数，泄露率
 
         lora_A = module.lora_A[active_adapter]
         lora_B = module.lora_B[active_adapter]
