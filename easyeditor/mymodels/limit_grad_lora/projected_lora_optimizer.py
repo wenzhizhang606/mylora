@@ -121,7 +121,7 @@ class ProjectedLoRAOptimizer(Adam):
         leak_rate_param = cache.get("leak_rate_param", None)
         # 如果没有泄露率，则退回到第一个版本
         if leak_rate_param is not None:
-            leak = torch.sigmoid(leak_rate_param.detach().to(device=grad.device, dtype=grad.dtype)) * 0.2
+            leak = torch.sigmoid(leak_rate_param.detach().to(device=grad.device, dtype=grad.dtype)) * 0.0
         else:
             leak = torch.zeros(1, device=grad.device, dtype=grad.dtype)
 

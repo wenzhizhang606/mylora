@@ -15,7 +15,7 @@ from utils import (
 HF_CACHE_DIR = os.getenv("HF_CACHE_DIR")
 os.environ["HF_DATASETS_CACHE"] = os.getenv("HF_DATASETS_DIR")
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ["CUDA_VISIBLE_DEVICES"] = "6,7" 
+os.environ["CUDA_VISIBLE_DEVICES"] = "1,2" 
 
 import argparse
 import torch
@@ -189,7 +189,7 @@ def get_hparams(args):
 def calculate_model_name(args, hparams):
     if args.projection_method_lora is not None:
         alg = getattr(hparams, 'alg_name', args.projection_method_lora)
-        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
+        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}_wo"
     elif args.projection_method is not None:
         alg = getattr(hparams, 'alg_name', args.projection_method)
         name = f"{args.model}_{args.projection_method}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
@@ -247,9 +247,10 @@ if __name__ == "__main__":
     if args.sequential_edit:
         edited_model = execute_ft_sequential(model, tokenizer, requests, hparams,tracker = tracker)
     elif args.projection_method_lora is not None:
-        if args.projection_method_lora == "v1_param":
+        if args.projection_method_lora == "v2_param":
             edited_model = execute_ft_param_lora(model, tokenizer, requests, hparams,tracker = tracker)
-        elif args.projection_method_lora == "v1_grad":
+        elif args.projection_method_lora == "v2_grad":
+            print("="*50)
             edited_model = execute_ft_grad_lora(model, tokenizer, requests, hparams,tracker = tracker)
         elif args.projection_method_lora == "v2":
             edited_model = execute_ft_both_lora(model, tokenizer, requests, hparams,tracker = tracker)

@@ -4,7 +4,7 @@ model_name: "Llama3-8B"
 
 # 目标编辑层（Llama-3-8B 共 32 层，中后段 MLP 对事实存储贡献最大）
 layers: [19, 20, 21, 22, 23]
-rewrite_module_tmp: "model.layers.{}.mlp.down_proj"
+rewrite_module_tmp: "model.layers.{}.mlp.down_proj.weight"
 layer_module_tmp: "model.layers.{}"
 mlp_module_tmp: "model.layers.{}.mlp"
 attn_module_tmp: "model.layers.{}.self_attn"

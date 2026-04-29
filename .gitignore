@@ -13,6 +13,7 @@ eval.sh
 run.sh
 run_edited_benchmarks_chunk.py
 Meta-Llama-3-8B-Instruct/
+Meta-Llama-3-8B-Instruct.bak/
 swanlog/
 data/
 ARGS.md

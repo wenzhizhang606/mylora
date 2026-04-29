@@ -43,7 +43,8 @@ def _get_oai_client(api_key: str) -> OpenAI:
 
         _OAI_CLIENT = OpenAI(
             #base_url="https://open.bigmodel.cn/api/coding/paas/v4",
-            base_url="https://api.minimaxi.com/v1",
+            #base_url="https://api.minimaxi.com/v1",
+            base_url="https://api.openai-proxy.org/v1",
             api_key=key,
             http_client=http_client,
             max_retries=0,  # we handle retries explicitly below
@@ -122,7 +123,7 @@ Just return the letters "A" or "B", with no text around it.
     for attempt in range(1, 4):  # 3 attempts total
         try:
             completion = client.chat.completions.create(
-                model="MiniMax-M2.7",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": ""},
                     {"role": "user", "content": content}
@@ -132,11 +133,11 @@ Just return the letters "A" or "B", with no text around it.
             )
             llm_ans = completion.choices[0].message.content
             # 针对于minimax 
-            llm_anx  =re.search(r'</think>\s*([AB])', llm_ans, re.S).group(1)
+            #llm_anx  =re.search(r'</think>\s*([AB])', llm_ans, re.S).group(1)
             print(f"大模型的返回是：{llm_ans}")
             llm_score = 1.0 if llm_ans == "A" else 0.0
 
-            # time.sleep(0.05)  # avoid high rate of request
+            time.sleep(0.05)  # avoid high rate of request
             return llm_score
 
         except (APITimeoutError, APIConnectionError, httpx.TimeoutException, httpx.ConnectError,

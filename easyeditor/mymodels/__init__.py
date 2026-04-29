@@ -20,8 +20,7 @@ from .limit_grad_lora import (
     map_proj_cache_to_lora_params,
     wrap_model_and_build_projected_optimizer,
     apply_limit_grad_lora_to_model,
-    compute_marginal_masks,
-    get_rank_and_threshold_by_energy_ratio,
+    compute_marginal_masks
 )
 
 # ── 限制参数增量的 LoRA ──────────────────────────────────────────────────────
@@ -45,7 +44,6 @@ __all__ = [
     "wrap_model_and_build_projected_optimizer",
     "apply_limit_grad_lora_to_model",
     "compute_marginal_masks",
-    "get_rank_and_threshold_by_energy_ratio",
     # 调整参数增量
     "CurvatureLora",
     "attach_curvature_lora_variant"
