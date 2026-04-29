@@ -7,14 +7,14 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "7"  # 只使用第1、2张显卡
 import argparse
 from utils import print_time, prepare_requests_from_data_type
 from easyeditor.editors.utils import summary_metrics
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer
+from vllm import LLM
 import numpy as np
 from easyeditor.evaluate.evaluate import compute_edit_quality, compute_edit_quality_safety
-from easyeditor.models.crispedit.utils import update_model_and_tokenizer_with_appropriate_padding_token
 import random
 import torch
 from tqdm import tqdm
-import wandb
+from tools import *
 from easyeditor.util import HyperParams
 
 
@@ -26,10 +26,25 @@ torch.cuda.manual_seed_all(SEED)
 torch.backends.cudnn.deterministic = True
 
 def get_model_and_tokenizer_from_dir(edited_model_dir_local):
+    # 替换为vllm库加载模型
     PREFIX_DIR = os.getenv("HF_CACHE_DIR")
     edited_model_dir = PREFIX_DIR + edited_model_dir_local
-    tokenizer = AutoTokenizer.from_pretrained(edited_model_dir)
-    model = AutoModelForCausalLM.from_pretrained(edited_model_dir, device_map='auto')
+    print(f"[vLLM] Loading model from: {edited_model_dir}")
+    tokenizer = AutoTokenizer.from_pretrained(
+        edited_model_dir,
+        trust_remote_code=True,
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
+    model = LLM(
+        model=edited_model_dir,
+        tokenizer=edited_model_dir,
+        dtype="bfloat16",
+        trust_remote_code=True,
+        tensor_parallel_size=1,
+        gpu_memory_utilization=0.9,
+    )
     return model, tokenizer
 
 def get_arguments():
@@ -66,17 +81,14 @@ if __name__ == "__main__":
     requests = prepare_requests_from_data_type(args.data_type)
     model, tokenizer = get_model_and_tokenizer_from_dir(args.edited_model_dir)
     # device expects the device number only
-    device = model.device.index
-
-    # set appropriate padding token
-    model, tokenizer = update_model_and_tokenizer_with_appropriate_padding_token(model, tokenizer, hparams)
+    device = 0
 
     run_name = args.edited_model_dir + f"_eval_{args.evaluation_criteria}_{args.context_type}"
-    run = wandb.init(project=args.wandb_project, name=run_name, config=vars(hparams), resume=args.wandb_run_id if not args.wandb_run_id else "must", id=args.wandb_run_id, mode="disabled" if args.no_wandb else "online")
+    run = ExperimentTracker(project=args.wandb_project, name=run_name, config=vars(hparams))
+    run.init()
 
     # before evaluation, always make sure tokenizer padding side is correct
-    if tokenizer.padding_side != "left":
-        tokenizer.padding_side = "left"
+
 
     print_time("Begin Post Edit Eval Time")
     requests = random.sample(requests, len(requests))
@@ -99,6 +111,6 @@ if __name__ == "__main__":
         summary_metrics(all_metrics, f"./logs/{run_name}")
 
     print_time("End Post Edit Eval Time") 
-    artifact = wandb.Artifact('mean_metrics', type='dataset')
+    artifact = run.Artifact('mean_metrics', type='dataset')
     artifact.add_file(f'./logs/{run_name}/mean_metrics.json')
     run.log_artifact(artifact)
