@@ -15,7 +15,7 @@ from utils import (
 HF_CACHE_DIR = os.getenv("HF_CACHE_DIR")
 os.environ["HF_DATASETS_CACHE"] = os.getenv("HF_DATASETS_DIR")
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ["CUDA_VISIBLE_DEVICES"] = "1,2" 
+os.environ["CUDA_VISIBLE_DEVICES"] = "4,6" 
 
 import argparse
 import torch
@@ -189,7 +189,7 @@ def get_hparams(args):
 def calculate_model_name(args, hparams):
     if args.projection_method_lora is not None:
         alg = getattr(hparams, 'alg_name', args.projection_method_lora)
-        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}_wo"
+        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}_leak0.5"
     elif args.projection_method is not None:
         alg = getattr(hparams, 'alg_name', args.projection_method)
         name = f"{args.model}_{args.projection_method}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"

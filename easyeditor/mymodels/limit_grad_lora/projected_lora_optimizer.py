@@ -121,7 +121,7 @@ class ProjectedLoRAOptimizer(Adam):
         leak_rate_param = cache.get("leak_rate_param", None)
         # 如果没有泄露率，则退回到第一个版本
         if leak_rate_param is not None:
-            leak = torch.sigmoid(leak_rate_param.detach().to(device=grad.device, dtype=grad.dtype)) * 0.0
+            leak = torch.sigmoid(leak_rate_param.detach().to(device=grad.device, dtype=grad.dtype)) * 0.1
         else:
             leak = torch.zeros(1, device=grad.device, dtype=grad.dtype)
 
@@ -151,7 +151,8 @@ class ProjectedLoRAOptimizer(Adam):
             # grad: (d_out, r)，左乘投影矩阵
             grad_high = (mask_b @ mask_b.T) @ grad          # (d_out, r)
             # 软屏蔽：低曲率方向保留全部梯度，高曲率方向仅保留 leak 比例
-            grad_proj = grad - (1.0 - leak) * grad_high
+            #grad_proj = grad - (1.0 - leak) * grad_high
+            grad_proj = grad - (1.0 - 0.5) * grad_high
             return grad_proj
 
         else:
