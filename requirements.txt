@@ -5,7 +5,7 @@ hydra-core==1.1.1
 higher==0.2.1
 importlib-metadata==6.3.0
 matplotlib==3.5.1
-nltk >= 3.9.1
+nltk>=3.9.1
 numpy==1.22.1
 omegaconf==2.1.1
 pandas==1.4.0
@@ -27,8 +27,12 @@ av==14.2.0
 qwen_vl_utils==0.0.10
 zhipuai==2.1.5.20250415
 sentencepiece==0.2.0
+xformers==0.0.22
+pydantic<2
+vllm==0.2.0
 wandb
 python-dotenv
 langdetect
 immutabledict
 lm_eval
+swanlab

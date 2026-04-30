@@ -3,18 +3,19 @@ from dotenv import load_dotenv
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ["CUDA_VISIBLE_DEVICES"] = "7"  # 只使用第1、2张显卡
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"  # 只使用第1、2张显卡
 import argparse
 from utils import print_time, prepare_requests_from_data_type
 from easyeditor.editors.utils import summary_metrics
 from transformers import AutoTokenizer
 from vllm import LLM
 import numpy as np
-from easyeditor.evaluate.evaluate import compute_edit_quality, compute_edit_quality_safety
+# 修改使用vllm库
+from easyeditor.evaluate.evaluate_vllm import compute_edit_quality, compute_edit_quality_safety
 import random
 import torch
 from tqdm import tqdm
-from tools import *
+import wandb
 from easyeditor.util import HyperParams
 
 
@@ -84,8 +85,7 @@ if __name__ == "__main__":
     device = 0
 
     run_name = args.edited_model_dir + f"_eval_{args.evaluation_criteria}_{args.context_type}"
-    run = ExperimentTracker(project=args.wandb_project, name=run_name, config=vars(hparams))
-    run.init()
+    run = wandb.init(project=args.wandb_project, name=run_name, config=vars(hparams), resume=args.wandb_run_id if not args.wandb_run_id else "must", id=args.wandb_run_id, mode="disabled" if args.no_wandb else "online")
 
     # before evaluation, always make sure tokenizer padding side is correct
 
@@ -113,4 +113,4 @@ if __name__ == "__main__":
     print_time("End Post Edit Eval Time") 
     artifact = run.Artifact('mean_metrics', type='dataset')
     artifact.add_file(f'./logs/{run_name}/mean_metrics.json')
-    run.log_artifact(artifact)
+    tracker.log_artifact(artifact)
