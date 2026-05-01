@@ -1,5 +1,5 @@
-from .tracker import tracker
+from .tracker import ExperimentTracker
 
 __version__ = "1.0.0"
 
-__all__ = ["tracker"]
+__all__ = ["ExperimentTracker"]

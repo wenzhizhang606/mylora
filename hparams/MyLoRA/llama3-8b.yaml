@@ -52,3 +52,6 @@ disable_old_loss_check: true
 
 kl_factor: 0
 norm_constraint: false
+
+# 临时添加
+use_projection: false

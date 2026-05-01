@@ -75,6 +75,8 @@ class CrispLoRAHyperParams(HyperParams):
     kl_factor: float = 0.0
     norm_constraint: bool = False
 
+    use_projection:bool= False
+    
     @classmethod
     def from_hparams(cls, hparams_name_or_path: str):
         if ".yaml" not in hparams_name_or_path:

@@ -1,6 +1,5 @@
 import os
-from dotenv import load_dotenv, find_dotenv
-
+from dotenv import load_dotenv ,find_dotenv
 try:
     import wandb
 except ImportError:
@@ -12,219 +11,100 @@ except ImportError:
     swanlab = None
 
 
-class _ExperimentTrackerBackend:
-    """
-    真正负责 wandb / swanlab 初始化、log、finish 的内部类。
-
-    外部不直接使用这个类。
-    外部只使用全局对象 tracker。
-    """
-
-    def __init__(
-        self,
-        project: str,
-        name: str = None,
-        config: dict = None,
-        tracker_type: str = "swanlab",
-        mode: bool = True,
-    ):
+class ExperimentTracker:
+    def __init__(self, 
+                 project: str, 
+                 name: str = None, 
+                 config: dict = None, 
+                 tracker_type: str = None,
+                 mode: bool = True):
+        """
+        :param project: 项目名称
+        :param name: 实验/Run名称
+        :param config: 超参数配置字典
+        :param tracker_type: 决定使用哪个追踪器，可选值: "wandb", "swanlab", "none"
+        """
         load_dotenv(find_dotenv())
-
+        
         self.project = project
         self.name = name
         self.config = config or {}
+
         self.tracker_type = tracker_type.lower()
+        
+        self.use_wandb = (self.tracker_type == "wandb")
+        self.use_swanlab = (self.tracker_type == "swanlab")
         self.mode = mode
+        if self.mode:
+            self._setup_trackers()
 
-        self.use_wandb = self.tracker_type == "wandb"
-        self.use_swanlab = self.tracker_type == "swanlab"
-        self.use_none = self.tracker_type == "none"
-
-        if self.tracker_type not in ["wandb", "swanlab", "none"]:
-            raise ValueError(
-                f"不支持的 tracker_type: {tracker_type}, "
-                f"可选值为: 'wandb', 'swanlab', 'none'"
-            )
-
-        self.initialized = False
-
-    def _setup(self):
-        if not self.mode or self.use_none:
-            return
-
+    def _setup_trackers(self):
         if self.use_wandb:
             if wandb is None:
-                raise ValueError("未安装 wandb 库!")
-
-            wandb_key = os.getenv("WANDB_API_KEY")
-            if wandb_key:
-                wandb.login(key=wandb_key)
+                raise ValueError("未安装wandb库!")
             else:
-                raise ValueError(".env 中未找到 WANDB_API_KEY")
+                wandb_key = os.getenv("WANDB_API_KEY")
+                if wandb_key:
+                    wandb.login(key=wandb_key)
+                else:
+                    raise ValueError(".env 中未找到 WANDB_API_KEY")
 
         elif self.use_swanlab:
             if swanlab is None:
-                raise ValueError("未安装 swanlab 库!")
-
-            swanlab_key = os.getenv("SWANLAB_API_KEY")
-            if swanlab_key:
-                swanlab.login(api_key=swanlab_key)
+                raise ValueError("未安装swanlab库!")
             else:
-                raise ValueError(".env 中未找到 SWANLAB_API_KEY")
+                swanlab_key = os.getenv("SWANLAB_API_KEY")
+                if swanlab_key:
+                    # SwanLab 的 API Key 登录机制
+                    swanlab.login(api_key=swanlab_key)
+                else:
+                    raise ValueError(".env 中未找到 SWANLAB_API_KEY")
 
     def init(self):
-        if not self.mode or self.use_none:
-            self.initialized = True
+        if not self.mode:
             return
-
-        self._setup()
-
         if self.use_wandb:
             wandb.init(
                 project=self.project,
                 name=self.name,
-                config=self.config,
+                config=self.config
             )
             print(f"Wandb initialized -> Project: {self.project}, Run: {self.name}")
 
         elif self.use_swanlab:
             swanlab.init(
                 project=self.project,
-                experiment_name=self.name,
-                config=self.config,
+                experiment_name=self.name, 
+                config=self.config
             )
-            print(
-                f"SwanLab initialized -> Project: {self.project}, "
-                f"Experiment: {self.name}"
-            )
-
-        self.initialized = True
+            print(f"SwanLab initialized -> Project: {self.project}, Experiment: {self.name}")
 
     def log(self, metrics: dict, step: int = None):
-        if not self.mode or self.use_none:
+        if not self.mode:
             return
-
-        if not self.initialized:
-            raise RuntimeError("Tracker 尚未初始化，请先调用 tracker.init(...)")
-
         if self.use_wandb:
             wandb.log(metrics, step=step)
-
+            
         elif self.use_swanlab:
             swanlab.log(metrics, step=step)
 
     def finish(self):
-        if not self.mode or self.use_none:
+        if not self.mode:
             return
-
-        if not self.initialized:
-            return
-
         if self.use_wandb:
             wandb.finish()
-
+            
         elif self.use_swanlab:
-            if hasattr(swanlab, "finish"):
+            if hasattr(swanlab, 'finish'):
                 swanlab.finish()
-
-        self.initialized = False
-
-
-class _Tracker:
-    """
-    对外暴露的全局 tracker 门面对象。
-
-    用法：
-
-        from tracker import tracker
-
-        tracker.init(...)
-        tracker.log(...)
-        tracker.finish()
-    """
-
-    def __init__(self):
-        self._backend = None
-
-    def init(
-        self,
-        project: str,
-        name: str = None,
-        config: dict = None,
-        tracker_type: str = "swanlab",
-        mode: bool = True,
-    ):
-        self._backend = _ExperimentTrackerBackend(
-            project=project,
-            name=name,
-            config=config,
-            tracker_type=tracker_type,
-            mode=mode,
-        )
-
-        self._backend.init()
-
-    def log(self, metrics: dict, step: int = None):
-        if self._backend is None:
-            raise RuntimeError("Tracker 尚未初始化，请先调用 tracker.init(...)")
-
-        self._backend.log(metrics, step=step)
-
-    def finish(self):
-        if self._backend is None:
-            return
-
-        self._backend.finish()
-        self._backend = None
-
-
-# ============================================================
-# 对外暴露的全局 tracker 对象
-# ============================================================
-
-tracker = _Tracker()
-
-
-# ============================================================
-# 兼容 import experiment_tracker as tracker 的写法
-# ============================================================
-
-def init(
-    project: str,
-    name: str = None,
-    config: dict = None,
-    tracker_type: str = "swanlab",
-    mode: bool = True,
-):
-    return tracker.init(
-        project=project,
-        name=name,
-        config=config,
-        tracker_type=tracker_type,
-        mode=mode,
-    )
-
-
-def log(metrics: dict, step: int = None):
-    return tracker.log(metrics, step=step)
-
-
-def finish():
-    return tracker.finish()
 
 
 def test():
-    tracker.init(
-        project="111",
-        name="111",
-        config={},
-        tracker_type="wandb",
-    )
-
+    demo = ExperimentTracker("111","111",{},"wandb")
+    demo.init()
     for i in range(100):
-        tracker.log({"demo": i + 1}, step=i)
-
-    tracker.finish()
+        demo.log({"demo":i+1})
+    demo.finish()
 
 
 if __name__ == "__main__":

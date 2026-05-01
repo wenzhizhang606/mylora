@@ -27,6 +27,7 @@ from easyeditor.mymodels import (
     build_lora_projection_cache,
     attach_curvature_lora_variant,
     apply_leaky_lora_to_model,
+    apply_lora_to_model
 )
 from peft import LoraConfig, get_peft_model, TaskType
 
@@ -639,3 +640,15 @@ def execute_ft_both_lora(
     requests = [{"prompt": "The capital of France is", "target_new": " Paris"}]
     model = execute_crispedit_param(model, tok, requests, hparams)
 '''
+
+
+def execute_ft_lora(
+    model: AutoModelForCausalLM,
+    tok: AutoTokenizer,
+    requests: List[Dict],
+    hparams: CrispLoRAHyperParams,
+    **kwargs: Any,
+) -> AutoModelForCausalLM:
+    print("进入第一层函数 ......")
+    tracker = kwargs.get("tracker", None)
+    return apply_lora_to_model(model, tok, requests, hparams,tracker = tracker)

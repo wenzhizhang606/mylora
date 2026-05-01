@@ -105,12 +105,14 @@ def get_arguments():
 
     # ── mylora 新参数
     parser.add_argument('--projection_method_lora', type=str, default=None,
-                        choices=["v2_param","v2_grad","v2"],
+                        choices=["v2_param","v2_grad","v2_test"],
                         help="Projection onto the gradient or onto the parameters")
+    
     parser.add_argument('--projection_method', type=str, default=None,
                         choices=["param","both"],
                         help="Projection onto the gradient or onto the parameters")
-    
+    # 适配v2_test使用
+    parser.add_argument('--use_projection',action='store_true')
     args = parser.parse_args()
     return args
 
@@ -128,6 +130,8 @@ def get_hparams(args):
         hparams.projection_method_lora = args.projection_method_lora
         #临时增加，修改rank
         hparams.lora_rank=args.lora_rank
+        if args.use_projection:
+            hparams.use_projection = True
         if hasattr(hparams, 'disable_old_loss_check'):
             hparams.disable_old_loss_check = args.disable_old_loss_check
         if hasattr(hparams, 'recalculate_cache'):
@@ -252,8 +256,9 @@ if __name__ == "__main__":
         elif args.projection_method_lora == "v2_grad":
             print("="*50)
             edited_model = execute_ft_grad_lora(model, tokenizer, requests, hparams,tracker = tracker)
-        elif args.projection_method_lora == "v2":
-            edited_model = execute_ft_both_lora(model, tokenizer, requests, hparams,tracker = tracker)
+        elif args.projection_method_lora == "v2_lora":
+            print("v2_lora","#"*50)
+            edited_model = execute_ft_lora(model, tokenizer, requests, hparams,tracker = tracker)
     elif args.projection_method is not None:
         if args.projection_method == "param":
             edited_model = execute_crispedit_param(model, tokenizer, requests, hparams,tracker = tracker)

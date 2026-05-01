@@ -34,6 +34,8 @@ from .limit_lora import(
   apply_leaky_lora_to_model
 )
 
+from .lora_proj.utils import apply_lora_to_model
+
 __all__ = [
     # 超参数
     "CrispLoRAHyperParams",
@@ -46,5 +48,6 @@ __all__ = [
     "compute_marginal_masks",
     # 调整参数增量
     "CurvatureLora",
-    "attach_curvature_lora_variant"
+    "attach_curvature_lora_variant",
+    "apply_lora_to_model"
 ]
