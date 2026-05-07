@@ -15,7 +15,7 @@ from utils import (
 HF_CACHE_DIR = os.getenv("HF_CACHE_DIR")
 os.environ["HF_DATASETS_CACHE"] = os.getenv("HF_DATASETS_DIR")
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ["CUDA_VISIBLE_DEVICES"] = "4,6" 
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1" 
 
 import argparse
 import torch
@@ -105,7 +105,7 @@ def get_arguments():
 
     # ── mylora 新参数
     parser.add_argument('--projection_method_lora', type=str, default=None,
-                        choices=["v2_param","v2_grad","v2_test"],
+                        choices=["v2_param","v2_grad","v2_lora"],
                         help="Projection onto the gradient or onto the parameters")
     
     parser.add_argument('--projection_method', type=str, default=None,
@@ -193,7 +193,9 @@ def get_hparams(args):
 def calculate_model_name(args, hparams):
     if args.projection_method_lora is not None:
         alg = getattr(hparams, 'alg_name', args.projection_method_lora)
-        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}_leak0.5"
+        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
+        if hparams.use_projection:
+            name +=f"_use_projection"
     elif args.projection_method is not None:
         alg = getattr(hparams, 'alg_name', args.projection_method)
         name = f"{args.model}_{args.projection_method}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
