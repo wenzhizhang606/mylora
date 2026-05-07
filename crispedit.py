@@ -27,7 +27,8 @@ from easyeditor.mymodels import (
     build_lora_projection_cache,
     attach_curvature_lora_variant,
     apply_leaky_lora_to_model,
-    apply_lora_to_model
+    apply_lora_to_model,
+    apply_simple_finetune
 )
 from peft import LoraConfig, get_peft_model, TaskType
 
@@ -614,9 +615,7 @@ def execute_ft_param_lora(
             break
 
     merged_model = peft_model.merge_and_unload()
-    return merged_model
-    
-    
+    return merged_model  
 
 def execute_ft_both_lora(
     model: AutoModelForCausalLM,
@@ -652,3 +651,15 @@ def execute_ft_lora(
     print("进入第一层函数 ......")
     tracker = kwargs.get("tracker", None)
     return apply_lora_to_model(model, tok, requests, hparams,tracker = tracker)
+
+
+def execute_finetune(
+    model: AutoModelForCausalLM,
+    tok: AutoTokenizer,
+    requests: List[Dict],
+    hparams: CrispLoRAHyperParams,
+    **kwargs: Any,
+) -> AutoModelForCausalLM:
+    print("进入execute_finetune函数 ......")
+    tracker = kwargs.get("tracker", None)
+    return apply_simple_finetune(model, tok, requests, hparams,tracker = tracker)

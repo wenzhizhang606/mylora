@@ -52,6 +52,9 @@ from .safe_lora import (
     compute_attenuation_from_danger,
 )
 
+from .finetune import(
+    apply_simple_finetune,
+)
 __all__ = [
     # 超参数
     "CrispLoRAHyperParams",
@@ -77,4 +80,6 @@ __all__ = [
     "compute_safety_scores",
     "compute_danger_vector",
     "compute_attenuation_from_danger",
+
+    "apply_simple_finetune",
 ]
