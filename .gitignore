@@ -22,3 +22,4 @@ run_edited_benchmarks_1.py
 launch_when_ready.sh
 run_1.sh
 run_2.sh
+.claude/
