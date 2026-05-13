@@ -57,8 +57,11 @@ def apply_simple_finetune(
     # 解冻目标层
     for layer_idx in hparams.layers:
         module_name = hparams.rewrite_module_tmp.format(layer_idx)
+        # 去掉末尾的weight
+        module_name = module_name[:-len(".weight")] if module_name.endswith(".weight") else module_name
         module = model.get_submodule(module_name)
         for param in module.parameters():
+            print(f"解冻目标层:{module_name}")
             param.requires_grad = True
 
     # 优化器
@@ -88,9 +91,8 @@ def apply_simple_finetune(
             optimizer.zero_grad()
             loss = _compute_loss(model, tok, txt_batch, tgt_batch, device, hparams)
 
-            if loss.item() >= 1e-3:
-                loss.backward()
-                optimizer.step()
+            loss.backward()
+            optimizer.step()
 
             total_loss += loss.item()
 

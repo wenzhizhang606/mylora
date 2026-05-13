@@ -15,7 +15,7 @@ from utils import (
 HF_CACHE_DIR = os.getenv("HF_CACHE_DIR")
 os.environ["HF_DATASETS_CACHE"] = os.getenv("HF_DATASETS_DIR")
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1" 
+os.environ["CUDA_VISIBLE_DEVICES"] = "2,3" 
 
 import argparse
 import torch
@@ -47,7 +47,7 @@ def get_arguments():
                                  'safeedit_train', 'safeedit_test'])
     #new
     parser.add_argument('--alg_name', required=True, type=str, default='lora',
-                        choices=['crispedit','lora',"mylora",'crispedit_b_pro'])
+                        choices=['crispedit','lora',"mylora",'crispedit_b_pro','FT'])
     parser.add_argument('--cache_sample_num', type=int, default=10000,
                         help='Number of samples to use for caching projection matrices.')
     parser.add_argument('--edit_sample_num', type=int, default=1000,
@@ -117,7 +117,7 @@ def get_arguments():
     return args
 
 def get_hparams(args):
-    if args.projection_method_lora is not None:
+    if args.projection_method_lora is not None or args.alg_name == "FT":
         print(f"[run_crispedit] 加载 MyLoRA 配置")
         hparams = CrispLoRAHyperParams.from_hparams(f"./hparams/MyLoRA/{args.model}")
         hparams.batch_size = args.batch_size
@@ -204,7 +204,7 @@ def calculate_model_name(args, hparams):
     elif args.no_crisp:
         name = f"{args.model}_FT_{args.data_type}"
     else:
-        name = (f"{args.model}_{hparams.alg_name}_{args.data_type}"
+        name = (f"{args.model}_{args.alg_name}_{args.data_type}"
                 f"_{args.energy_threshold}_{hparams.mom2_n_samples}")
 
     if args.sequential_edit:
@@ -230,6 +230,7 @@ if __name__ == "__main__":
     
     save_model_name = calculate_model_name(args, hparams)
     print(f"Model will be saved to BASE_DIR/{save_model_name}")
+
     tracker = ExperimentTracker(project=args.wandb_project, name=save_model_name,config=vars(hparams),tracker_type=args.plat_name)
     tracker.init()
     #wandb.init(project=args.wandb_project, name=save_model_name, config=vars(hparams), mode="disabled" if args.no_wandb else "online")
@@ -248,7 +249,7 @@ if __name__ == "__main__":
     # set appropriate padding token
     model, tokenizer = update_model_and_tokenizer_with_appropriate_padding_token(model, tokenizer, hparams)
     
-
+    
     print_time("Begin FT Time")
     if args.sequential_edit:
         edited_model = execute_ft_sequential(model, tokenizer, requests, hparams,tracker = tracker)
@@ -264,6 +265,8 @@ if __name__ == "__main__":
     elif args.projection_method is not None:
         if args.projection_method == "param":
             edited_model = execute_crispedit_param(model, tokenizer, requests, hparams,tracker = tracker)
+    elif args.alg_name == "FT":
+        edited_model = execute_finetune(model, tokenizer, requests, hparams,tracker = tracker)
     else:
         edited_model = execute_ft(model, tokenizer, requests, hparams,tracker = tracker)
     print_time("End FT Time")
