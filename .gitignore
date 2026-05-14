@@ -23,3 +23,5 @@ launch_when_ready.sh
 run_1.sh
 run_2.sh
 .claude/
+requirements.txt_20260512.bak
+requirements_update.txt
