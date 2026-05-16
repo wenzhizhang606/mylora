@@ -2,24 +2,21 @@ import os
 import random
 import torch
 import numpy as np
-from lm_eval.evaluator import simple_evaluate
-from lm_eval.models.huggingface import HFLM
-from dotenv import load_dotenv
-load_dotenv()
-API_KEY = os.getenv("API_KEY")
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ["HF_HOME"] = "/data1/zwz/dataset"
-os.environ["HF_DATASETS_CACHE"] = "/data1/zwz/dataset/datasets"
-
-os.environ["HF_DATASETS_OFFLINE"] = "0"
-os.environ["TRANSFORMERS_OFFLINE"] = "0"
-os.environ["CUDA_VISIBLE_DEVICES"] = "7" # 只使用第1、2张显卡
 import argparse
+from dotenv import load_dotenv
+
+# lm_eval 相关引入
+from lm_eval import simple_evaluate
+from lm_eval.models.vllm_causallm import VLLM
+
+# 工具与自定义模块引入
 from utils import print_time, save_clean_results
-from transformers import AutoTokenizer, AutoModelForCausalLM
 from easyeditor.util import HyperParams
 from easyeditor.mymodels.tools.tracker import ExperimentTracker
 
+load_dotenv()
+API_KEY = os.getenv("API_KEY")
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 SEED = 69
 random.seed(SEED)
@@ -27,17 +24,6 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed_all(SEED)
 torch.backends.cudnn.deterministic = True
-
-
-def get_model_and_tokenizer_from_dir(edited_model_dir_local):
-    PREFIX_DIR = os.getenv("HF_CACHE_DIR", "")
-    if PREFIX_DIR and not os.path.isabs(edited_model_dir_local):
-        edited_model_dir = os.path.join(PREFIX_DIR, edited_model_dir_local)
-    else:
-        edited_model_dir = edited_model_dir_local
-    tokenizer = AutoTokenizer.from_pretrained(edited_model_dir)
-    model = AutoModelForCausalLM.from_pretrained(edited_model_dir, device_map='auto')
-    return model, tokenizer
 
 
 def get_arguments():
@@ -62,6 +48,9 @@ def get_arguments():
     parser.add_argument('--apply_chat_template', action='store_true',
                         help='Apply chat template (for instruct models). '
                              'Leave off for base models.')
+    # 新增：允许从命令行控制 vLLM 参数
+    parser.add_argument('--tensor_parallel_size', type=int, default=1,
+                        help='Number of GPUs to use for tensor parallelism in vLLM.')
     args = parser.parse_args()
     return args
 
@@ -73,41 +62,48 @@ def build_hparams_from_args(args):
     return hparams
 
 
-if __name__ == "__main__":
+def resolve_model_path(edited_model_dir_local):
+    """解析绝对或相对路径，用于传递给 vLLM"""
+    PREFIX_DIR = os.getenv("HF_CACHE_DIR", "")
+    if PREFIX_DIR and not os.path.isabs(edited_model_dir_local):
+        return os.path.join(PREFIX_DIR, edited_model_dir_local)
+    return edited_model_dir_local
+
+
+def run_base():
     args = get_arguments()
     hparams = build_hparams_from_args(args)
-    model, tokenizer = get_model_and_tokenizer_from_dir(args.edited_model_dir)
-
+    
+    model_path = resolve_model_path(args.edited_model_dir)
     run_name = args.edited_model_dir.replace("/", "_").replace("\\", "_").strip("_")
 
-    # ---- Tracker (swanlab / wandb / none) ----
-    tracker = ExperimentTracker(
+    ExperimentTracker.init(
         project=args.wandb_project,
         name=run_name,
         config=vars(hparams),
         tracker_type=args.plat_name,
         mode=(args.plat_name != "none"),
     )
-    tracker.init()
 
-    # Ensure left padding for log-likelihood-based tasks
-    if tokenizer.padding_side != "left":
-        tokenizer.padding_side = "left"
-
-    lm_wrapper = HFLM(
-        pretrained=model,
-        tokenizer=tokenizer,
+    # 3. 初始化 vLLM Wrapper
+    print(f"Loading vLLM model from: {model_path}")
+    lm_wrapper = VLLM(
+        pretrained=model_path,
+        tensor_parallel_size=args.tensor_parallel_size, # 多卡支持
+        dtype="auto",                                   # 自动推断精度 (fp16/bf16)
+        gpu_memory_utilization=0.85,                    # 限制显存占用比例，留出部分显存防止 OOM
+        trust_remote_code=True
     )
 
     print_time("Begin Capability Eval Time")
 
     # ── Task definitions ──────────────────────────────────────────
     tasks_with_config = {
-        "mmlu":           {"shots": 5, "batch": "auto"},
+        "mmlu":           {"shots": 5, "batch": "auto","dataset_path": os.path.join(,"mmlu")},
         # "ifeval":       {"shots": 0, "batch": "auto"},
         # "truthfulqa_mc2": {"shots": 0, "batch": "auto"},
-        # "gsm8k_cot":    {"shots": 8, "batch": 2},
-        # "arc_challenge": {"shots": 25, "batch": 1},
+        # "gsm8k_cot":    {"shots": 8, "batch": "auto"}, # 建议 vllm 也用 auto batch size
+        # "arc_challenge": {"shots": 25, "batch": "auto"},
     }
 
     results = {"results": {}}
@@ -127,7 +123,7 @@ if __name__ == "__main__":
 
         if "results" in _results:
             results["results"].update(_results["results"])
-            tracker.log(_results["results"])
+            ExperimentTracker.log(_results["results"]) # 现在 tracker 已被正确引用
         else:
             print(f"Warning: no results found for task {task_name}")
 
@@ -136,9 +132,9 @@ if __name__ == "__main__":
     os.makedirs(log_dir, exist_ok=True)
     save_clean_results(results, log_dir)
 
-    # Log raw results as a JSON file path (swanlab can track this)
+    # Log raw results as a JSON file path
     raw_results_path = os.path.join(log_dir, "capability.json")
     print(f"Raw results saved to: {raw_results_path}")
 
     print_time("End Capability Eval Time")
-    tracker.finish()
+    ExperimentTracker.finish()
