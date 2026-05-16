@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ["CUDA_VISIBLE_DEVICES"] = "0" # 只使用第1、2张显卡
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import argparse
 from utils import print_time, prepare_requests_from_data_type
 from easyeditor.editors.utils import summary_metrics
@@ -61,6 +61,9 @@ def get_arguments():
     parser.add_argument('--wandb_project', type=str, default='CrispEdit_EVAL', help='WandB project name.')
     parser.add_argument('--wandb_run_id', type=str, default=None, help='WandB run ID for resuming runs.')
     parser.add_argument('--no_wandb', action='store_true', help='Disable wandb logging.')
+
+    # 新增参数，控制使用哪一张显卡 
+    parser.add_argument('--use', required=True, type=str, default=None, help='Disable wandb logging.')
     args = parser.parse_args()
     return args
 
