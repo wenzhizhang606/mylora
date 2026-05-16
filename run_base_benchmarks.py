@@ -8,7 +8,12 @@ from dotenv import load_dotenv
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ["CUDA_VISIBLE_DEVICES"] = "0" # 只使用第1、2张显卡
+os.environ["HF_HOME"] = "/data1/zwz/dataset"
+os.environ["HF_DATASETS_CACHE"] = "/data1/zwz/dataset/datasets"
+
+os.environ["HF_DATASETS_OFFLINE"] = "0"
+os.environ["TRANSFORMERS_OFFLINE"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "7" # 只使用第1、2张显卡
 import argparse
 from utils import print_time, save_clean_results
 from transformers import AutoTokenizer, AutoModelForCausalLM
