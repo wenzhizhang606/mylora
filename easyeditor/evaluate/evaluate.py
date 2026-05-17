@@ -79,7 +79,6 @@ def compute_edit_quality(
     :param vec: ???
     :return: Dictionary containing rewriting metrics
     """
-    print("="*50,"#"*10)
     if isinstance(model,LORA):
         model=model.model
 

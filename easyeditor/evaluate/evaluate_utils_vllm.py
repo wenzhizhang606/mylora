@@ -28,7 +28,7 @@ def _build_oai_client(api_key: str) -> OpenAI:
     timeout = httpx.Timeout(connect=10.0, read=60.0, write=60.0, pool=10.0)
     limits = httpx.Limits(max_connections=20, max_keepalive_connections=10)
     return OpenAI(
-        base_url="https://api.openai-proxy.org/v1",
+        base_url="https://api.deepseek.com",
         api_key=key,
         http_client=httpx.Client(timeout=timeout, limits=limits),
         max_retries=0,
@@ -130,7 +130,7 @@ Just return the letters "A" or "B", with no text around it.
     for attempt in range(1, max_attempts + 1):
         try:
             completion = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="deepseek-v4-flash",
                 messages=[{"role": "system", "content": ""}, {"role": "user", "content": content}],
                 temperature=0.0,
                 timeout=60.0,
@@ -210,7 +210,7 @@ Just return the letters "A" or "B", with no text around it.
     for attempt in range(1, max_attempts + 1):
         try:
             completion = client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="deepseek-v4-flash",
                 messages=[{"role": "system", "content": ""}, {"role": "user", "content": content}],
                 temperature=0.0,
                 timeout=60.0,

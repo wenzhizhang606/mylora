@@ -25,3 +25,4 @@ run_2.sh
 .claude/
 requirements.txt_20260512.bak
 requirements_update.txt
+logs_gpt4o_mini/

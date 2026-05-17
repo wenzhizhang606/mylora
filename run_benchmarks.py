@@ -3,7 +3,7 @@ import argparse
 import os
 import re
 
-def judge_cuda_visible_devices(str):
+
 
 
 
@@ -33,7 +33,5 @@ def get_arguments():
 if __name__=="__main__":
     # 提取命令行参数
     args = get_arguments()
-    # 校验有没有乱传参数
-
-    # 设置使用显卡
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    #分发评测
+    
