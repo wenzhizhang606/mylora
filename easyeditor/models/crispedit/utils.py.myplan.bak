@@ -15,6 +15,34 @@ import os
 load_dotenv()
 STATS_DIR = os.getenv("STATS_DIR")
 
+#zwz:临时修改
+def get_topk_indices_by_energy_ratio(eigenvalues: torch.Tensor, percent: float = 0.9):
+    """
+        根据累积能量比例选择高曲率方向。
+        返回：
+        k: 需要保留的高曲率方向数量
+        idx: 高曲率方向对应的特征值下标
+        threshold: 第 k 个特征值阈值
+    """
+    eigenvalues = torch.clamp(eigenvalues, min=0.0)
+
+    sorted_eigvals, sorted_idx = torch.sort(eigenvalues, descending=True)
+    total_energy = torch.sum(sorted_eigvals)
+
+    if total_energy <= 0:
+        return 0, sorted_idx[:0], torch.tensor(0.0, device=eigenvalues.device)
+
+    cumulative_energy = torch.cumsum(sorted_eigvals, dim=0)
+    energy_ratio = cumulative_energy / total_energy
+
+    k = torch.searchsorted(energy_ratio, percent).item() + 1
+    idx = sorted_idx[:k]
+    threshold = sorted_eigvals[k - 1]
+
+    return k, idx, threshold
+#zwz:end
+
+
 def get_rank_and_threshold_by_energy_ratio(eigenvalues, percent=0.9):
     total_energy = torch.sum(eigenvalues)
     sorted_eigvals, _ = torch.sort(eigenvalues, descending=True)
@@ -28,13 +56,19 @@ def get_rank_and_threshold_by_energy_ratio(eigenvalues, percent=0.9):
 def calculate_projection_cache_with_kfac(A, B, energy_threshold=0.9):
     Sa, Ua = torch.linalg.eigh(A)
     Sb, Ub = torch.linalg.eigh(B)
-
+    #zwz:临时修改
     M = torch.outer(Sa, Sb)
-    rank, null_threshold = get_rank_and_threshold_by_energy_ratio(M.view(-1), percent=energy_threshold)
-    M = M < null_threshold
-    print(f"Rank is {rank} out of {A.shape[0]*B.shape[0]} total, null threshold: {null_threshold}")
+    #rank, null_threshold = get_rank_and_threshold_by_energy_ratio(M.view(-1), percent=energy_threshold)
+    #M = M < null_threshold
+    #print(f"Rank is {rank} out of {A.shape[0]*B.shape[0]} total, null threshold: {null_threshold}")
+    #return {'Ua': Ua,'Ub': Ub, 'M': M}
+    k_in, idx_in, threshold_in = get_topk_indices_by_energy_ratio(Sa, percent=energy_threshold)
+    k_out, idx_out, threshold_out = get_topk_indices_by_energy_ratio(Sb, percent=energy_threshold)
+    Uin_high = Ua[:, idx_in].contiguous()
+    Uout_high = Ub[:, idx_out].contiguous()
+    return {'Ua':Uin_high,'Ub':Uout_high, 'M': M}
+    #zwz:end
 
-    return {'Ua': Ua, 'Ub': Ub, 'M': M}
 
 def get_cov_ab(
     model: AutoModelForCausalLM,

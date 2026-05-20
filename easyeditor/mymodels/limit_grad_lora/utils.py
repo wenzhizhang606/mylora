@@ -11,6 +11,7 @@ from copy import deepcopy
 from .projected_lora_optimizer import ProjectedLoRAOptimizer
 from ...models.rome.layer_stats import layer_stats_kfac_one_pass
 from ..hparams import CrispLoRAHyperParams
+from ..tools import ExperimentTracker
 
 load_dotenv()
 STATS_DIR = os.getenv("STATS_DIR")
@@ -283,8 +284,6 @@ def apply_limit_grad_lora_to_model(
     keep_original_weight: bool = False,
     **kwargs,
 ) -> AutoModelForCausalLM:
-    tracker = kwargs.get("tracker", None) 
-
     if tok.padding_side != "right":
         tok.padding_side = "right"
 
@@ -325,8 +324,7 @@ def apply_limit_grad_lora_to_model(
 
         num_batches = max(1, math.ceil(len(texts) / hparams.batch_size))
         avg_loss = total_loss / num_batches
-        if tracker is not None:
-            tracker.log({"LOSS": avg_loss})
+        ExperimentTracker.log({"LOSS": avg_loss})
         print(f"[GradLoRA] Step {step+1}/{hparams.num_steps}  loss={avg_loss:.4f}")
         if avg_loss < 1e-3:
             print("[GradLoRA] 损失收敛，提前结束训练")

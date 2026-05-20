@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 # lm_eval 相关引入
 from lm_eval import simple_evaluate
-from lm_eval.models.vllm_causallm import VLLM
+from lm_eval.models.vllm_causallms import VLLM 
 
 # 工具与自定义模块引入
 from utils import print_time, save_clean_results
@@ -70,7 +70,7 @@ def resolve_model_path(edited_model_dir_local):
     return edited_model_dir_local
 
 
-def run_base():
+if __name__ =="__main__":
     args = get_arguments()
     hparams = build_hparams_from_args(args)
     
@@ -96,29 +96,30 @@ def run_base():
     )
 
     print_time("Begin Capability Eval Time")
-
+    HF_DATASETS_DIR = os.getenv("HF_DATASETS_DIR")
     # ── Task definitions ──────────────────────────────────────────
     tasks_with_config = {
-        "mmlu":           {"shots": 5, "batch": "auto","dataset_path": os.path.join(,"mmlu")},
-        # "ifeval":       {"shots": 0, "batch": "auto"},
-        # "truthfulqa_mc2": {"shots": 0, "batch": "auto"},
-        # "gsm8k_cot":    {"shots": 8, "batch": "auto"}, # 建议 vllm 也用 auto batch size
-        # "arc_challenge": {"shots": 25, "batch": "auto"},
+        "mmlu":           {"shots": 5, "batch_size": "auto","dataset_path": os.path.join(HF_DATASETS_DIR,"mmlu")},
+        "ifeval":       {"shots": 0, "batch_size": "auto","dataset_path": os.path.join(HF_DATASETS_DIR,"ifeval")},
+        #"truthfulqa_mc2": {"shots": 0, "batch_size": "auto","dataset_path": os.path.join(HF_DATASETS_DIR,"mmlu")},
+        #"gsm8k_cot":    {"shots": 8, "batch_size": "auto","dataset_path": os.path.join(HF_DATASETS_DIR,"mmlu")}, # 建议 vllm 也用 auto batch size
+        #"arc_challenge": {"shots": 25, "batch_size": "auto","dataset_path": os.path.join(HF_DATASETS_DIR,"mmlu")},
     }
 
     results = {"results": {}}
 
     for task_name, config in tasks_with_config.items():
-        print(f"Running {task_name} (Shots: {config['shots']}, Batch: {config['batch']})...")
+        print(f"Running {task_name} (Shots: {config['shots']}, Batch: {config['batch_size']})...")
 
         _results = simple_evaluate(
             model=lm_wrapper,
             tasks=[task_name],
             limit=args.eval_num,
             num_fewshot=config['shots'],
-            batch_size=config['batch'],
+            batch_size=config['batch_size'],
             apply_chat_template=args.apply_chat_template,
             fewshot_as_multiturn=args.apply_chat_template,
+            confirm_run_unsafe_code=True,  
         )
 
         if "results" in _results:

@@ -3,7 +3,7 @@ import torch
 from typing import List
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from ..hparams import CrispLoRAHyperParams
-
+from ..tools import *
 
 def _compute_loss(
     model,
@@ -46,8 +46,6 @@ def apply_simple_finetune(
     hparams: CrispLoRAHyperParams,
     **kwargs
 ):
-    tracker = kwargs.get("tracker", None) 
-
     if tok.padding_side != "right":
         tok.padding_side = "right"
     # 冻结所有参数
@@ -98,8 +96,7 @@ def apply_simple_finetune(
 
         num_batches = max(1, math.ceil(len(texts) / hparams.batch_size))
         avg_loss = total_loss / num_batches
-        if tracker is not None:
-            tracker.log({"LOSS": avg_loss})
+        ExperimentTracker.log({"LOSS": avg_loss})
         print(f"Step {step+1}/{hparams.num_steps}, Loss: {avg_loss:.4f}")
         if avg_loss < 1e-3:
             print("损失收敛，提前结束训练")

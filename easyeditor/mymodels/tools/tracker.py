@@ -1,5 +1,6 @@
 import os
-from dotenv import load_dotenv ,find_dotenv
+from dotenv import load_dotenv, find_dotenv
+
 try:
     import wandb
 except ImportError:
@@ -12,100 +13,101 @@ except ImportError:
 
 
 class ExperimentTracker:
-    def __init__(self, 
-                 project: str, 
-                 name: str = None, 
-                 config: dict = None, 
-                 tracker_type: str = None,
-                 mode: bool = True):
-        """
+    """单例实验追踪器，通过类名直接调用
+
+    """
+    _instance = None
+
+    # ── 类级状态 ──
+    _mode: bool = True
+    _use_wandb: bool = False
+    _use_swanlab: bool = False
+    _project: str = ""
+    _name: str = ""
+
+    @classmethod
+    def init(cls,
+             project: str,
+             name: str = None,
+             config: dict = None,
+             tracker_type: str = None,
+             mode: bool = True):
+        """初始化单例追踪器。
+
         :param project: 项目名称
         :param name: 实验/Run名称
         :param config: 超参数配置字典
-        :param tracker_type: 决定使用哪个追踪器，可选值: "wandb", "swanlab", "none"
+        :param tracker_type: "wandb", "swanlab", 或 "none"
+        :param mode: 是否启用追踪
         """
         load_dotenv(find_dotenv())
-        
-        self.project = project
-        self.name = name
-        self.config = config or {}
 
-        self.tracker_type = tracker_type.lower()
-        
-        self.use_wandb = (self.tracker_type == "wandb")
-        self.use_swanlab = (self.tracker_type == "swanlab")
-        self.mode = mode
-        if self.mode:
-            self._setup_trackers()
+        cls._mode = mode
+        if tracker_type is None:
+            cls._use_wandb = False
+            cls._use_swanlab = False
+        else:
+            ttype = tracker_type.lower()
+            cls._use_wandb = (ttype == "wandb")
+            cls._use_swanlab = (ttype == "swanlab")
 
-    def _setup_trackers(self):
-        if self.use_wandb:
+        cls._project = project
+        cls._name = name or ""
+        cls._config = config or {}
+
+        if cls._mode:
+            cls._setup_backend()
+            cls._launch_run()
+
+        cls._instance = cls.__new__(cls)
+
+    @classmethod
+    def _setup_backend(cls):
+        """登录对应的后端服务。"""
+        if cls._use_wandb:
             if wandb is None:
-                raise ValueError("未安装wandb库!")
-            else:
-                wandb_key = os.getenv("WANDB_API_KEY")
-                if wandb_key:
-                    wandb.login(key=wandb_key)
-                else:
-                    raise ValueError(".env 中未找到 WANDB_API_KEY")
+                raise ImportError("未安装 wandb 库!")
+            key = os.getenv("WANDB_API_KEY")
+            if not key:
+                raise ValueError(".env 中未找到 WANDB_API_KEY")
+            wandb.login(key=key)
 
-        elif self.use_swanlab:
+        elif cls._use_swanlab:
             if swanlab is None:
-                raise ValueError("未安装swanlab库!")
-            else:
-                swanlab_key = os.getenv("SWANLAB_API_KEY")
-                if swanlab_key:
-                    # SwanLab 的 API Key 登录机制
-                    swanlab.login(api_key=swanlab_key)
-                else:
-                    raise ValueError(".env 中未找到 SWANLAB_API_KEY")
+                raise ImportError("未安装 swanlab 库!")
+            key = os.getenv("SWANLAB_API_KEY")
+            if not key:
+                raise ValueError(".env 中未找到 SWANLAB_API_KEY")
+            swanlab.login(api_key=key)
 
-    def init(self):
-        if not self.mode:
+    @classmethod
+    def _launch_run(cls):
+        """启动对应的实验 run。"""
+        if cls._use_wandb:
+            wandb.init(project=cls._project, name=cls._name, config=cls._config)
+            print(f"Wandb initialized -> Project: {cls._project}, Run: {cls._name}")
+        elif cls._use_swanlab:
+            swanlab.init(project=cls._project, experiment_name=cls._name, config=cls._config)
+            print(f"SwanLab initialized -> Project: {cls._project}, Experiment: {cls._name}")
+
+    @classmethod
+    def log(cls, metrics: dict, step: int = None):
+        """记录指标。"""
+        if not cls._mode:
             return
-        if self.use_wandb:
-            wandb.init(
-                project=self.project,
-                name=self.name,
-                config=self.config
-            )
-            print(f"Wandb initialized -> Project: {self.project}, Run: {self.name}")
-
-        elif self.use_swanlab:
-            swanlab.init(
-                project=self.project,
-                experiment_name=self.name, 
-                config=self.config
-            )
-            print(f"SwanLab initialized -> Project: {self.project}, Experiment: {self.name}")
-
-    def log(self, metrics: dict, step: int = None):
-        if not self.mode:
-            return
-        if self.use_wandb:
+        if cls._use_wandb:
             wandb.log(metrics, step=step)
-            
-        elif self.use_swanlab:
+        elif cls._use_swanlab:
             swanlab.log(metrics, step=step)
 
-    def finish(self):
-        if not self.mode:
+    @classmethod
+    def finish(cls):
+        """结束当前 run。"""
+        if not cls._mode:
             return
-        if self.use_wandb:
+        if cls._use_wandb:
             wandb.finish()
-            
-        elif self.use_swanlab:
+        elif cls._use_swanlab:
             if hasattr(swanlab, 'finish'):
                 swanlab.finish()
 
-
-def test():
-    demo = ExperimentTracker("111","111",{},"wandb")
-    demo.init()
-    for i in range(100):
-        demo.log({"demo":i+1})
-    demo.finish()
-
-
-if __name__ == "__main__":
-    test()

@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 import torch
 from tqdm import trange
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from tools import *
+from easyeditor.mymodels.tools.tracker import ExperimentTracker
 from utils import chunks, save_model_and_tokenizer
 
 from easyeditor.models.crispedit.CrispEdit_hparams import CrispEditHyperParams
@@ -45,7 +45,6 @@ def execute_ft(
     """
     print("进入执行函数")
     device = model.device
-    tracker = kwargs.get("tracker", None)
     if tok.padding_side != "right":
         tok.padding_side = "right"
     
@@ -69,7 +68,7 @@ def execute_ft(
             w.requires_grad = name in weights
     
     old_loss = calculate_old_loss(model, tok, hparams)
-    tracker.log(old_loss) # fine to log even if empty, basically no-op
+    ExperimentTracker.log(old_loss) # fine to log even if empty, basically no-op
     
     loss_meter = AverageMeter()
     pbar = trange(hparams.num_steps)
@@ -115,7 +114,7 @@ def execute_ft(
 
         metrics = calculate_old_loss(model, tok, hparams)
         metrics.update({f"FT Loss": loss_meter.avg})
-        tracker.log(metrics) # fine to log even if empty, basically no-op
+        ExperimentTracker.log(metrics) # fine to log even if empty, basically no-op
         
         pbar.set_postfix({"loss": f"{loss_meter.avg:.4f}"})
         if loss_meter.avg < 1e-2:
@@ -377,8 +376,8 @@ def execute_ft_grad_lora(
     **kwargs: Any,
 ) -> AutoModelForCausalLM:
     # 对于梯度进行投影
-    tracker = kwargs.get("tracker", None)
-    return apply_limit_grad_lora_to_model(model,tok,requests,hparams,tracker = tracker)
+    print("[]进入execute_ft_grad_lora函数中......")
+    return apply_limit_grad_lora_to_model(model,tok,requests,hparams)
     
     '''
     device = model.device
@@ -661,5 +660,4 @@ def execute_finetune(
     **kwargs: Any,
 ) -> AutoModelForCausalLM:
     print("进入execute_finetune函数 ......")
-    tracker = kwargs.get("tracker", None)
-    return apply_simple_finetune(model, tok, requests, hparams,tracker = tracker)
+    return apply_simple_finetune(model, tok, requests, hparams)

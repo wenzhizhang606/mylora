@@ -44,6 +44,7 @@ class ProjectedAdam(Adam):
                 U_A = cache['Ua'].to(device=p.device, dtype=p.dtype)
                 U_B = cache['Ub'].to(device=p.device, dtype=p.dtype)
                 M   = cache['M'].to(device=p.device, dtype=p.dtype)
+
                 state = self.state[p]
                 if 'exp_avg' in state:
                     m = state['exp_avg']
@@ -94,21 +95,15 @@ class ProjectedAdam(Adam):
                 
                 U_A = group['projection_cache_map'][p]['Ua'].to(device=grad.device, dtype=grad.dtype)
                 U_B = group['projection_cache_map'][p]['Ub'].to(device=grad.device, dtype=grad.dtype)
-                #M = group['projection_cache_map'][p]['M'].to(device=grad.device, dtype=grad.dtype)
-                #zwz:临时修改
-                #grad_proj = U_B @ ( (U_B.T @ grad @ U_A) * M.T ) @ U_A.T
-                I_out = torch.eye(U_B.shape[0],device=grad.device,dtype=grad.dtype)
-                I_in  = torch.eye(U_A.shape[0],device=grad.device,dtype=grad.dtype)
-                grad_proj = (I_out - U_B @ U_B.T) @ grad @(I_in - U_A @ U_A.T)
-
-                '''
+                M = group['projection_cache_map'][p]['M'].to(device=grad.device, dtype=grad.dtype)
+                grad_proj = U_B @ ( (U_B.T @ grad @ U_A) * M.T ) @ U_A.T
+                
                 if 'additional_projection_cache_map' in group and p in group['additional_projection_cache_map']:
                     U_A = group['additional_projection_cache_map'][p]['Ua'].to(device=grad.device, dtype=grad.dtype)
                     U_B = group['additional_projection_cache_map'][p]['Ub'].to(device=grad.device, dtype=grad.dtype)
                     M = group['additional_projection_cache_map'][p]['M'].to(device=grad.device, dtype=grad.dtype)
                     grad_proj = U_B @ ( (U_B.T @ grad_proj @ U_A) * M.T ) @ U_A.T
-                '''
-                #zwz:end
+
                 p.grad.copy_(grad_proj)
 
         return super().step(closure)

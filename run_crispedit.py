@@ -3,7 +3,7 @@ import numpy as np
 import os
 from easyeditor.models.crispedit.utils import update_model_and_tokenizer_with_appropriate_padding_token
 from crispedit import *
-from tools import *
+from easyeditor.mymodels.tools import ExperimentTracker
 from dotenv import load_dotenv
 load_dotenv()
 from utils import (
@@ -15,7 +15,6 @@ from utils import (
 HF_CACHE_DIR = os.getenv("HF_CACHE_DIR")
 os.environ["HF_DATASETS_CACHE"] = os.getenv("HF_DATASETS_DIR")
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-os.environ["CUDA_VISIBLE_DEVICES"] = "2,3" 
 
 import argparse
 import torch
@@ -47,7 +46,7 @@ def get_arguments():
                                  'safeedit_train', 'safeedit_test'])
     #new
     parser.add_argument('--alg_name', required=True, type=str, default='lora',
-                        choices=['crispedit','lora',"mylora",'crispedit_b_pro','FT'])
+                        choices=['crispedit',"myedit","mylora",'lora','FT'])
     parser.add_argument('--cache_sample_num', type=int, default=10000,
                         help='Number of samples to use for caching projection matrices.')
     parser.add_argument('--edit_sample_num', type=int, default=1000,
@@ -90,7 +89,7 @@ def get_arguments():
 
     parser.add_argument('--perform_lora', action='store_true',
                         help='Use CrispEdit built-in LoRA mode (execute_ft_lora).')
-    parser.add_argument('--lora_rank', type=int, default=64,
+    parser.add_argument('--lora_rank', type=int, default=32,
                         help='LoRA rank.')
     parser.add_argument('--lora_alpha', type=int, default=32,
                         help='LoRA alpha.')
@@ -111,8 +110,9 @@ def get_arguments():
     parser.add_argument('--projection_method', type=str, default=None,
                         choices=["param","both"],
                         help="Projection onto the gradient or onto the parameters")
-    # 适配v2_test使用
-    parser.add_argument('--use_projection',action='store_true')
+    # 使用lora时，可以选择渗透部分
+    parser.add_argument('--use_leak',action='store_true')
+    parser.add_argument('--leak_rate',type=float, default=0.7)
     args = parser.parse_args()
     return args
 
@@ -231,8 +231,7 @@ if __name__ == "__main__":
     save_model_name = calculate_model_name(args, hparams)
     print(f"Model will be saved to BASE_DIR/{save_model_name}")
 
-    tracker = ExperimentTracker(project=args.wandb_project, name=save_model_name,config=vars(hparams),tracker_type=args.plat_name)
-    tracker.init()
+    ExperimentTracker.init(project=args.wandb_project, name=save_model_name, config=vars(hparams), tracker_type=args.plat_name)
     #wandb.init(project=args.wandb_project, name=save_model_name, config=vars(hparams), mode="disabled" if args.no_wandb else "online")
 
     MODEL_NAME = hparams.model_name
@@ -252,23 +251,26 @@ if __name__ == "__main__":
     
     print_time("Begin FT Time")
     if args.sequential_edit:
-        edited_model = execute_ft_sequential(model, tokenizer, requests, hparams,tracker = tracker)
+        print("[1]Crispedit微调的序列模式")
+        edited_model = execute_ft_sequential(model, tokenizer, requests, hparams)
     elif args.projection_method_lora is not None:
+        print("[1]针对lora进行投影......")
         if args.projection_method_lora == "v2_param":
-            edited_model = execute_ft_param_lora(model, tokenizer, requests, hparams,tracker = tracker)
+            edited_model = execute_ft_param_lora(model, tokenizer, requests, hparams)
         elif args.projection_method_lora == "v2_grad":
-            print("="*50)
-            edited_model = execute_ft_grad_lora(model, tokenizer, requests, hparams,tracker = tracker)
+            edited_model = execute_ft_grad_lora(model, tokenizer, requests, hparams)
         elif args.projection_method_lora == "v2_lora":
-            print("v2_lora","#"*50)
-            edited_model = execute_ft_lora(model, tokenizer, requests, hparams,tracker = tracker)
+            edited_model = execute_ft_lora(model, tokenizer, requests, hparams)
     elif args.projection_method is not None:
+        print("[1]针对矩阵进行投影......")
         if args.projection_method == "param":
-            edited_model = execute_crispedit_param(model, tokenizer, requests, hparams,tracker = tracker)
+            edited_model = execute_crispedit_param(model, tokenizer, requests, hparams)
     elif args.alg_name == "FT":
-        edited_model = execute_finetune(model, tokenizer, requests, hparams,tracker = tracker)
+        print("[1]进行全量微调......")
+        edited_model = execute_finetune(model, tokenizer, requests, hparams)
     else:
-        edited_model = execute_ft(model, tokenizer, requests, hparams,tracker = tracker)
+        print("[1]进行Crispedit方法微调......")
+        edited_model = execute_ft(model, tokenizer, requests, hparams)
     print_time("End FT Time")
 
 
