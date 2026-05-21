@@ -21,12 +21,18 @@ import torch
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from easyeditor.models.crispedit.CrispEdit_hparams import CrispEditHyperParams
+# 临时使用
 from easyeditor.mymodels.hparams import CrispLoRAHyperParams
+
+from easyeditor.mymodels.hparams import MyLoRAHyperParams
 
 from easyeditor.mymodels.crispedit_param import (
         CrispEditParamHyperParams,
         execute_crispedit_param,
     )
+
+# 之后删除除了我的方法其余均调用edit.py
+from easyeditor.models.ft import FTHyperParams
 
 SEED = 69
 random.seed(SEED)
@@ -46,7 +52,7 @@ def get_arguments():
                                  'safeedit_train', 'safeedit_test'])
     #new
     parser.add_argument('--alg_name', required=True, type=str, default='lora',
-                        choices=['crispedit',"myedit","mylora",'lora','FT'])
+                        choices=['crispedit',"myedit","lora",'mylora','FT'])
     parser.add_argument('--cache_sample_num', type=int, default=10000,
                         help='Number of samples to use for caching projection matrices.')
     parser.add_argument('--edit_sample_num', type=int, default=1000,
@@ -102,60 +108,60 @@ def get_arguments():
                         default=["q_proj", "v_proj"],
                         help='Target modules for LoRA adaptation.')
 
-    # ── mylora 新参数
+    # -- mylora 新参数
     parser.add_argument('--projection_method_lora', type=str, default=None,
-                        choices=["v2_param","v2_grad","v2_lora"],
-                        help="Projection onto the gradient or onto the parameters")
-    
-    parser.add_argument('--projection_method', type=str, default=None,
-                        choices=["param","both"],
+                        choices=["v2_param","v2_grad","v2_both"],
                         help="Projection onto the gradient or onto the parameters")
     # 使用lora时，可以选择渗透部分
     parser.add_argument('--use_leak',action='store_true')
-    parser.add_argument('--leak_rate',type=float, default=0.7)
+    parser.add_argument('--leak_rate',type=float, default=0.2)
+
+    # --myedit  新参数
+    parser.add_argument('--projection_method', type=str, default=None,
+                        choices=["param","both"],
+                        help="Projection onto the gradient or onto the parameters")
+
+
+    # --FT学习率
+    parser.add_argument('--lr',type=float, default=0.7)
+
     args = parser.parse_args()
     return args
 
 def get_hparams(args):
-    if args.projection_method_lora is not None or args.alg_name == "FT":
-        print(f"[run_crispedit] 加载 MyLoRA 配置")
-        hparams = CrispLoRAHyperParams.from_hparams(f"./hparams/MyLoRA/{args.model}")
+    if args.projection_method_lora is not None:
+        print(f"[run_mylora] 加载 MyLoRA 配置")
+        hparams = MyLoRAHyperParams.from_hparams(f"./hparams/MyLoRA/{args.model}")
         hparams.batch_size = args.batch_size
         hparams.energy_threshold = args.energy_threshold
         hparams.mom2_n_samples = args.cache_sample_num
         # 通过命令行参数修改rank
         hparams.lora_rank = args.lora_rank
-        hparams.lora_alpha = args.lora_rank
+        hparams.lora_alpha = args.lora_alpha
 
         hparams.projection_method_lora = args.projection_method_lora
-        #临时增加，修改rank
-        hparams.lora_rank=args.lora_rank
-        if args.use_projection:
-            hparams.use_projection = True
-        if hasattr(hparams, 'disable_old_loss_check'):
-            hparams.disable_old_loss_check = args.disable_old_loss_check
-        if hasattr(hparams, 'recalculate_cache'):
-            hparams.recalculate_cache = args.recalculate_cache
-        if hasattr(hparams, 'recalculate_weight_threshold'):
-            hparams.recalculate_weight_threshold = args.recalculate_weight_threshold
-        if hasattr(hparams, 'edit_cache_style'):
-            hparams.edit_cache_style = args.edit_cache_style
-        if hasattr(hparams, 'edit_n_samples'):
-            hparams.edit_n_samples = args.edit_sample_num
-
-        if args.sequential_edit and hasattr(hparams, 'num_edits'):
-            assert args.num_edits >= args.batch_size, \
-                "Makes no sense to have a batch_size bigger than number of edits..."
-            hparams.num_edits = args.num_edits
+        if args.use_leak:
+            hparams.use_leak = True
+            hparams.leak_rate = args.leak_rate
+        # todo:连续编辑
 
         return hparams
     elif args.projection_method is not None:
-        print(f"[run_crispedit] 加载 MyEdit 配置")
+        print(f"[run_myedit] 加载 MyEdit 配置")
         hparams = CrispEditParamHyperParams.from_hparams(f"./hparams/MyEdit/{args.model}")
         hparams.batch_size = args.batch_size
         hparams.energy_threshold = args.energy_threshold
         hparams.mom2_n_samples = args.cache_sample_num
-        hparams.projection_method_lora = args.projection_method_lora
+        hparams.projection_method = args.projection_method
+
+        return hparams
+    elif args.alg_name == "FT":
+        print(f"[run_FT] 加载 FT 配置")
+        hparams = FTHyperParams.from_hparams(f"./hparams/FT/{args.model}")
+        hparams.batch_size = args.batch_size
+        hparams.lr = args.lr
+
+        return hparams
 
     print(f"[run_crispedit] 加载 CrispEdit 配置")
     hparams = CrispEditHyperParams.from_hparams(f"./hparams/CrispEdit/{args.model}")
@@ -192,17 +198,16 @@ def get_hparams(args):
 
 def calculate_model_name(args, hparams):
     if args.projection_method_lora is not None:
-        alg = getattr(hparams, 'alg_name', args.projection_method_lora)
-        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
-        if hparams.use_projection:
-            name +=f"_use_projection"
+        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}_{len(hparams.layers)}"
     elif args.projection_method is not None:
-        alg = getattr(hparams, 'alg_name', args.projection_method)
         name = f"{args.model}_{args.projection_method}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
     elif args.perform_lora:
         name = f"{args.model}_LoRA_FT_{args.data_type}"
     elif args.no_crisp:
         name = f"{args.model}_FT_{args.data_type}"
+    elif args.alg_name == "FT":
+        name = f"{args.model}_{args.alg_name}_{args.data_type}_{hparams.lr}"
+        return name.replace('.', '_')
     else:
         name = (f"{args.model}_{args.alg_name}_{args.data_type}"
                 f"_{args.energy_threshold}_{hparams.mom2_n_samples}")
@@ -250,6 +255,8 @@ if __name__ == "__main__":
     
     
     print_time("Begin FT Time")
+    print(f"超参数列表为：{hparams}")
+
     if args.sequential_edit:
         print("[1]Crispedit微调的序列模式")
         edited_model = execute_ft_sequential(model, tokenizer, requests, hparams)

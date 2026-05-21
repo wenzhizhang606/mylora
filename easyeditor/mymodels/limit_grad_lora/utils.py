@@ -260,6 +260,8 @@ def wrap_model_and_build_projected_optimizer(
         lr=hparams.lr,
         weight_decay=hparams.weight_decay,
         projection_mode=hparams.projection_mode,
+        use_leak=hparams.use_leak,
+        leak_rate=hparams.leak_rate
     )
     #    optimizer_leak: 普通 Adam，学习率 ×2（与 limit_lora 保持一致）
     optimizer_leak = torch.optim.Adam(leak_params, lr=hparams.lr * 2)

@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import List
 import yaml
 
-from ..util.hparams import HyperParams
+from ...util.hparams import HyperParams
 
 
 @dataclass

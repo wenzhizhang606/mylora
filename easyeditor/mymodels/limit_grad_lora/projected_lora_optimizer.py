@@ -14,6 +14,8 @@ class ProjectedLoRAOptimizer(Adam):
         weight_decay: float = 0.0,
         amsgrad: bool = False,
         projection_mode: str = "marginal_AB",
+        use_leak:bool=False,
+        leak_rate:float =0.0
     ):
         defaults = dict(
             projection_cache_map={},
@@ -29,6 +31,8 @@ class ProjectedLoRAOptimizer(Adam):
         # 预加载：将投影矩阵搬到参数所在设备，避免每次 step 做 CPU→GPU 传输
         # leak_rate_param 是 nn.Parameter，不做设备迁移（已在正确设备上）
         self._preload_cache(projection_cache_map)
+        self.use_leak = use_leak
+        self.leak_rate = leak_rate
 
     # ──────────────────────────────────────────────────────────────────────────
     # 缓存管理
@@ -120,8 +124,9 @@ class ProjectedLoRAOptimizer(Adam):
         # ── 读取泄漏率（detach：仅读值，不影响计算图）──────────────────────────
         leak_rate_param = cache.get("leak_rate_param", None)
         # 如果没有泄露率，则退回到第一个版本
-        if leak_rate_param is not None:
-            leak = torch.sigmoid(leak_rate_param.detach().to(device=grad.device, dtype=grad.dtype)) * 0.1
+        if self.use_leak:
+            print("[*]use_leak......")
+            leak = torch.sigmoid(leak_rate_param.detach().to(device=grad.device, dtype=grad.dtype)) * self.leak_rate
         else:
             leak = torch.zeros(1, device=grad.device, dtype=grad.dtype)
 
@@ -152,7 +157,7 @@ class ProjectedLoRAOptimizer(Adam):
             grad_high = (mask_b @ mask_b.T) @ grad          # (d_out, r)
             # 软屏蔽：低曲率方向保留全部梯度，高曲率方向仅保留 leak 比例
             #grad_proj = grad - (1.0 - leak) * grad_high
-            grad_proj = grad - (1.0 - 0.5) * grad_high
+            grad_proj = grad - (1.0 - leak) * grad_high
             return grad_proj
 
         else:
