@@ -5,6 +5,98 @@ import numpy as np
 import argparse
 from dotenv import load_dotenv
 
+load_dotenv()
+
+LOCAL_DATASETS_DIR = os.getenv("HF_DATASETS_DIR", "/data1/zwz/datasets")
+os.environ.setdefault("HF_HOME", os.getenv("HF_HOME", "/data1/zwz"))
+os.environ.setdefault("HF_DATASETS_CACHE", LOCAL_DATASETS_DIR)
+os.environ.setdefault("HF_HUB_CACHE", os.getenv("HF_HUB_CACHE", LOCAL_DATASETS_DIR))
+os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+import datasets as hf_datasets
+from datasets import DownloadConfig
+
+_ORIGINAL_LOAD_DATASET = hf_datasets.load_dataset
+_LOCAL_DATASET_PATHS = {
+    "cais/mmlu": ("mmlu", "cais/mmlu"),
+    "hails/mmlu_no_train": ("mmlu", "mmlu_no_train", "hails/mmlu_no_train"),
+    "google/IFEval": ("ifeval", "IFEval", "google/IFEval"),
+    "truthfulqa/truthful_qa": ("truthful_qa", "truthfulqa/truthful_qa"),
+    "openai/gsm8k": ("gsm8k", "openai/gsm8k"),
+    "allenai/ai2_arc": ("ai2_arc", "allenai/ai2_arc"),
+}
+
+def _offline_enabled():
+    return os.environ.get("HF_DATASETS_OFFLINE", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _candidate_local_dataset_paths(path):
+    local_names = _LOCAL_DATASET_PATHS.get(path)
+    if local_names is None:
+        local_names = ()
+    elif isinstance(local_names, str):
+        local_names = (local_names,)
+
+    candidates = []
+
+    def add(candidate):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    if os.path.isabs(path):
+        add(path)
+
+    for local_name in local_names:
+        add(local_name if os.path.isabs(local_name) else os.path.join(LOCAL_DATASETS_DIR, local_name))
+
+    add(os.path.join(LOCAL_DATASETS_DIR, os.path.basename(path)))
+    add(os.path.join(LOCAL_DATASETS_DIR, path.replace("/", "__")))
+    add(os.path.join(LOCAL_DATASETS_DIR, path.replace("/", "_")))
+    return candidates
+
+
+def _redirect_to_local_dataset(path):
+    if path not in _LOCAL_DATASET_PATHS:
+        print(f"[datasets offline] No local redirect configured for: {path}")
+        return path
+
+    candidates = _candidate_local_dataset_paths(path)
+    for local_path in candidates:
+        if os.path.exists(local_path):
+            print(f"[datasets offline] {path} -> {local_path}")
+            return local_path
+
+    message = (
+        f"[datasets offline] Local dataset not found for {path}.\n"
+        f"  HF_DATASETS_DIR={LOCAL_DATASETS_DIR}\n"
+        f"  Checked:\n    " + "\n    ".join(candidates)
+    )
+    if _offline_enabled():
+        raise FileNotFoundError(
+            message
+            + "\nOffline mode is enabled, so the script will not download it from Hugging Face Hub."
+        )
+
+    print(message)
+    return path
+
+
+def load_dataset_local_first(*args, **kwargs):
+    if args:
+        args = (_redirect_to_local_dataset(args[0]),) + args[1:]
+    elif "path" in kwargs:
+        kwargs["path"] = _redirect_to_local_dataset(kwargs["path"])
+
+    if _offline_enabled():
+        kwargs.setdefault("download_config", DownloadConfig(local_files_only=True))
+    return _ORIGINAL_LOAD_DATASET(*args, **kwargs)
+
+
+hf_datasets.load_dataset = load_dataset_local_first
+
 # lm_eval 相关引入
 from lm_eval import simple_evaluate
 from lm_eval.models.vllm_causallms import VLLM 
@@ -14,9 +106,7 @@ from utils import print_time, save_clean_results
 from easyeditor.util import HyperParams
 from easyeditor.mymodels.tools.tracker import ExperimentTracker
 
-load_dotenv()
 API_KEY = os.getenv("API_KEY")
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 SEED = 69
 random.seed(SEED)
@@ -91,7 +181,7 @@ if __name__ =="__main__":
         pretrained=model_path,
         tensor_parallel_size=args.tensor_parallel_size, # 多卡支持
         dtype="auto",                                   # 自动推断精度 (fp16/bf16)
-        gpu_memory_utilization=0.85,                    # 限制显存占用比例，留出部分显存防止 OOM
+        gpu_memory_utilization=0.7,                    # 限制显存占用比例，留出部分显存防止 OOM
         trust_remote_code=True
     )
 
@@ -99,11 +189,11 @@ if __name__ =="__main__":
     HF_DATASETS_DIR = os.getenv("HF_DATASETS_DIR")
     # ── Task definitions ──────────────────────────────────────────
     tasks_with_config = {
-        "mmlu":           {"shots": 5, "batch_size": "auto","dataset_path": os.path.join(HF_DATASETS_DIR,"mmlu")},
-        "ifeval":       {"shots": 0, "batch_size": "auto","dataset_path": os.path.join(HF_DATASETS_DIR,"ifeval")},
-        #"truthfulqa_mc2": {"shots": 0, "batch_size": "auto","dataset_path": os.path.join(HF_DATASETS_DIR,"mmlu")},
-        #"gsm8k_cot":    {"shots": 8, "batch_size": "auto","dataset_path": os.path.join(HF_DATASETS_DIR,"mmlu")}, # 建议 vllm 也用 auto batch size
-        #"arc_challenge": {"shots": 25, "batch_size": "auto","dataset_path": os.path.join(HF_DATASETS_DIR,"mmlu")},
+        "mmlu":           {"shots": 5, "batch_size": "auto"},
+        "ifeval":       {"shots": 0, "batch_size": "auto"},
+        "truthfulqa_mc2": {"shots": 0, "batch_size": "auto"},
+        "gsm8k_cot":    {"shots": 8, "batch_size": "auto"}, 
+        "arc_challenge": {"shots": 25, "batch_size": "auto"},
     }
 
     results = {"results": {}}
@@ -119,7 +209,7 @@ if __name__ =="__main__":
             batch_size=config['batch_size'],
             apply_chat_template=args.apply_chat_template,
             fewshot_as_multiturn=args.apply_chat_template,
-            confirm_run_unsafe_code=True,  
+            #confirm_run_unsafe_code=True,  
         )
 
         if "results" in _results:
