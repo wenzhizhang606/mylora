@@ -99,7 +99,9 @@ hf_datasets.load_dataset = load_dataset_local_first
 
 # lm_eval 相关引入
 from lm_eval import simple_evaluate
-from lm_eval.models.vllm_causallms import VLLM 
+from lm_eval.models.huggingface import HFLM
+# from lm_eval.models.vllm_causallms import VLLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # 工具与自定义模块引入
 from utils import print_time, save_clean_results
@@ -138,10 +140,16 @@ def get_arguments():
     parser.add_argument('--apply_chat_template', action='store_true',
                         help='Apply chat template (for instruct models). '
                              'Leave off for base models.')
-    # 新增：允许从命令行控制 vLLM 参数
+    # vLLM 参数暂时保留在命令行中，避免旧启动脚本传参时报错；当前 transformers 后端不会使用它们。
     parser.add_argument('--tensor_parallel_size', type=int, default=1,
-                        help='Number of GPUs to use for tensor parallelism in vLLM.')
+                        help='Unused with transformers backend. Kept for compatibility.')
+    parser.add_argument('--gpu_memory_utilization', type=float, default=0.70,
+                        help='Unused with transformers backend. Kept for compatibility.')
+    parser.add_argument('--capability_batch_size', type=str, default='auto',
+                        help='Batch size for lm_eval capability benchmarks. Use "auto" or an integer.')
     args = parser.parse_args()
+    if args.capability_batch_size != "auto":
+        args.capability_batch_size = int(args.capability_batch_size)
     return args
 
 
@@ -160,6 +168,25 @@ def resolve_model_path(edited_model_dir_local):
     return edited_model_dir_local
 
 
+def get_model_and_tokenizer_from_dir(model_path):
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        trust_remote_code=True,
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        device_map="auto",
+        torch_dtype="auto",
+        trust_remote_code=True,
+    )
+    model.eval()
+    return model, tokenizer
+
+
 if __name__ =="__main__":
     args = get_arguments()
     hparams = build_hparams_from_args(args)
@@ -175,25 +202,39 @@ if __name__ =="__main__":
         mode=(args.plat_name != "none"),
     )
 
-    # 3. 初始化 vLLM Wrapper
-    print(f"Loading vLLM model from: {model_path}")
-    lm_wrapper = VLLM(
-        pretrained=model_path,
-        tensor_parallel_size=args.tensor_parallel_size, # 多卡支持
-        dtype="auto",                                   # 自动推断精度 (fp16/bf16)
-        gpu_memory_utilization=0.7,                    # 限制显存占用比例，留出部分显存防止 OOM
-        trust_remote_code=True
+    # 3. 初始化 transformers/HFLM Wrapper
+    print(f"Loading transformers model from: {model_path}")
+    model, tokenizer = get_model_and_tokenizer_from_dir(model_path)
+    lm_wrapper = HFLM(
+        pretrained=model,
+        tokenizer=tokenizer,
     )
+
+    # vLLM backend is disabled because lm_eval + vLLM can return prompt_logprobs=None
+    # on loglikelihood tasks such as MMLU in this environment.
+    # print(f"Loading vLLM model from: {model_path}")
+    # lm_wrapper = VLLM(
+    #     pretrained=model_path,
+    #     tensor_parallel_size=args.tensor_parallel_size,
+    #     batch_size=args.capability_batch_size,
+    #     max_batch_size=args.capability_batch_size,
+    #     dtype="auto",
+    #     gpu_memory_utilization=args.gpu_memory_utilization,
+    #     trust_remote_code=True,
+    # )
 
     print_time("Begin Capability Eval Time")
     HF_DATASETS_DIR = os.getenv("HF_DATASETS_DIR")
     # ── Task definitions ──────────────────────────────────────────
+    default_batch_size = args.capability_batch_size
+    heavy_batch_size = 1 if default_batch_size == "auto" else default_batch_size
+    cot_batch_size = 2 if default_batch_size == "auto" else default_batch_size
     tasks_with_config = {
-        "mmlu":           {"shots": 5, "batch_size": "auto"},
-        "ifeval":       {"shots": 0, "batch_size": "auto"},
-        "truthfulqa_mc2": {"shots": 0, "batch_size": "auto"},
-        "gsm8k_cot":    {"shots": 8, "batch_size": "auto"}, 
-        "arc_challenge": {"shots": 25, "batch_size": "auto"},
+        #"ifeval":         {"shots": 0, "batch_size": default_batch_size},
+        #"truthfulqa_mc2": {"shots": 0, "batch_size": default_batch_size},
+        "mmlu":           {"shots": 5, "batch_size": default_batch_size},
+        #"gsm8k_cot":      {"shots": 8, "batch_size": cot_batch_size},
+        #"arc_challenge":  {"shots": 25, "batch_size": heavy_batch_size},
     }
 
     results = {"results": {}}

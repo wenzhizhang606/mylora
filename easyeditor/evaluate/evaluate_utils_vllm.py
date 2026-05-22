@@ -134,6 +134,7 @@ Just return the letters "A" or "B", with no text around it.
                 messages=[{"role": "system", "content": ""}, {"role": "user", "content": content}],
                 temperature=0.0,
                 timeout=60.0,
+                extra_body={"thinking": {"type": "disabled"}}
             )
             llm_ans = completion.choices[0].message.content
             print(f"大模型的返回是：{llm_ans}")
