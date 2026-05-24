@@ -1,4 +1,5 @@
 import os
+import json
 from dotenv import load_dotenv
 load_dotenv()
 API_KEY = os.getenv("API_KEY")
@@ -12,7 +13,8 @@ from transformers import AutoTokenizer
 from vllm import LLM
 import numpy as np
 # 修改使用vllm库
-from easyeditor.evaluate.evaluate_vllm import compute_edit_quality, compute_edit_quality_safety
+from easyeditor.evaluate.evaluate_vllm_gpt import compute_edit_quality, compute_edit_quality_safety
+from easyeditor.evaluate.evaluate_utils_vllm_gpt import resolve_pending_llm_judges
 import random
 import torch
 from tqdm import tqdm
@@ -62,6 +64,7 @@ def get_arguments():
     parser.add_argument('--wandb_project', type=str, default='CrispEdit_EVAL', help='WandB project name.')
     parser.add_argument('--wandb_run_id', type=str, default=None, help='WandB run ID for resuming runs.')
     parser.add_argument('--no_wandb', action='store_true', help='Disable wandb logging.')
+    parser.add_argument('--judge_batch_size', required=False, type=int, default=16, help='Number of generated answers to judge per batch.')
     args = parser.parse_args()
     return args
 
@@ -99,6 +102,8 @@ if __name__ == "__main__":
         requests = requests[:args.eval_num]
 
     all_metrics = []
+    log_dir = f"./logs/{run_name}"
+    os.makedirs(log_dir, exist_ok=True)
 
     print("="*50)
     print("safe" not in args.data_type)
@@ -111,9 +116,19 @@ if __name__ == "__main__":
             "post": edit_eval_method(model, hparams.model_name, hparams, tokenizer, request, device)
         }
         all_metrics.append(metrics)
-        summary_metrics(all_metrics, f"./logs/{run_name}")
+        with open(os.path.join(log_dir, "results_pending_judge.json"), "w", encoding="utf-8") as f:
+            json.dump(all_metrics, f, ensure_ascii=False, indent=4)
+
+    if args.evaluation_criteria == "llm_judge":
+        all_metrics = resolve_pending_llm_judges(
+            all_metrics,
+            hparams.api_key,
+            batch_size=args.judge_batch_size,
+        )
+
+    summary_metrics(all_metrics, log_dir)
 
     print_time("End Post Edit Eval Time") 
-    artifact = run.Artifact('mean_metrics', type='dataset')
-    artifact.add_file(f'./logs/{run_name}/mean_metrics.json')
+    artifact = wandb.Artifact('mean_metrics', type='dataset')
+    artifact.add_file(os.path.join(log_dir, 'mean_metrics.json'))
     run.log_artifact(artifact)

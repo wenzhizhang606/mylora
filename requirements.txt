@@ -4,6 +4,7 @@ gpustat==1.1
 hydra-core==1.1.1
 higher==0.2.1
 importlib-metadata==6.3.0
+setuptools>=65.0.0,<70.0.0
 matplotlib==3.5.1
 nltk >= 3.9.1
 numpy>=1.24.4        
