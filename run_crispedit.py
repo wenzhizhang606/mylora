@@ -138,7 +138,7 @@ def get_hparams(args):
         # 通过命令行参数修改rank
         hparams.lora_rank = args.lora_rank
         hparams.lora_alpha = args.lora_alpha
-
+        hparams.lr =args.lr
         hparams.projection_method_lora = args.projection_method_lora
         if args.use_leak:
             hparams.use_leak = True
@@ -198,7 +198,7 @@ def get_hparams(args):
 
 def calculate_model_name(args, hparams):
     if args.projection_method_lora is not None:
-        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}_{len(hparams.layers)}"
+        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}_{hparams.lr}"
     elif args.projection_method is not None:
         name = f"{args.model}_{args.projection_method}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
     elif args.perform_lora:
