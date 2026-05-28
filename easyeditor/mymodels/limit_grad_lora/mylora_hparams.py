@@ -41,6 +41,11 @@ class MyLoRAHyperParams(HyperParams):
     mom2_n_samples: int = 10000
     mom2_dtype: str = "float32"
     energy_threshold: float = 0.5
+    base_kfac_cache_path: str = None
+    task_kfac_cache_path: str = None
+    task_kfac_weight: float = 0.0
+    task_kfac_tag: str = "task"
+    merged_kfac_cache_path: str = None
 
     # KFac 初始化与投影优化器
     projection_mode: str = "marginal_AB"
@@ -61,6 +66,11 @@ class MyLoRAHyperParams(HyperParams):
 
     use_leak:bool = False
     leak_rate: float = 0.2
+    newton_damping: float = 1e-3
+    use_dynamic_projection: bool = True
+    dynamic_projection_beta: float = 0.95
+    dynamic_projection_strength: float = 0.5
+    dynamic_projection_min_scale: float = 0.2
     projection_method_lora:str = None
 
     @classmethod

@@ -1,5 +1,6 @@
 import os
 import math
+from pathlib import Path
 import torch
 import torch.nn as nn
 from typing import Dict, List, Tuple, Optional
@@ -10,20 +11,131 @@ from copy import deepcopy
 
 from .projected_lora_optimizer import ProjectedLoRAOptimizer
 from ...models.rome.layer_stats import layer_stats_kfac_one_pass
-from ..hparams import CrispLoRAHyperParams
+from ..hparams.mylora_hparams import MyLoRAHyperParams
 from ..tools import ExperimentTracker
 
 load_dotenv()
 STATS_DIR = os.getenv("STATS_DIR")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 工具：判断模型类型
-# ═══════════════════════════════════════════════════════════════════════════
-
 def _is_llama_or_phi(model_name: str) -> bool:
     lower = model_name.lower()
     return "llama" in lower or "phi" in lower
+
+
+def _resolve_cache_path(path_like: Optional[str]) -> Optional[Path]:
+    if not path_like:
+        return None
+    path = Path(path_like)
+    if path.is_absolute():
+        return path
+    if STATS_DIR:
+        return Path(STATS_DIR) / path
+    return path
+
+
+def _default_merged_kfac_cache_path(
+    model: AutoModelForCausalLM,
+    hparams: MyLoRAHyperParams,
+) -> Path:
+    model_name = model.config._name_or_path.rsplit("/")[-1]
+    task_tag = getattr(hparams, "task_kfac_tag", "task")
+    task_weight = float(getattr(hparams, "task_kfac_weight", 0.0))
+    sample_size = getattr(hparams, "mom2_n_samples", "all")
+    filename = (
+        f"{model_name}_{hparams.mom2_dataset}_{task_tag}_"
+        f"w{task_weight:g}_{hparams.mom2_dtype}_{sample_size}.pt"
+    )
+    root = Path(STATS_DIR) if STATS_DIR else Path(".")
+    return root / model_name / "merged_kfac" / filename
+
+
+def _compute_pretrain_kfac_stats(
+    model: AutoModelForCausalLM,
+    tok: AutoTokenizer,
+    layer_names: List[str],
+    hparams: MyLoRAHyperParams,
+    force_recompute: bool,
+) -> Dict[str, Tuple]:
+    return layer_stats_kfac_one_pass(
+        model=model,
+        tokenizer=tok,
+        layer_names=layer_names,
+        stats_dir=STATS_DIR,
+        ds_name=hparams.mom2_dataset,
+        to_collect=["mom2"],
+        sample_size=hparams.mom2_n_samples,
+        precision=hparams.mom2_dtype,
+        force_recompute=force_recompute,
+    )
+
+
+def _unpack_kfac_entry(entry) -> Tuple[torch.Tensor, torch.Tensor, object]:
+    if isinstance(entry, dict):
+        return entry["A"], entry["B"], entry.get("N", entry.get("num_samples", None))
+    if isinstance(entry, (tuple, list)) and len(entry) >= 2:
+        n_tokens = entry[2] if len(entry) > 2 else None
+        return entry[0], entry[1], n_tokens
+    raise ValueError(f"Unsupported KFAC cache entry format: {type(entry)}")
+
+
+def _load_kfac_stats_dict(cache_path: Path, layer_names: List[str]) -> Dict[str, Tuple]:
+    payload = torch.load(cache_path, map_location="cpu")
+    raw_stats = payload.get("stats", payload) if isinstance(payload, dict) else payload
+    stats_dict = {}
+    for layer_name in layer_names:
+        if layer_name not in raw_stats:
+            raise KeyError(f"KFAC cache {cache_path} missing layer {layer_name}")
+        A, B, n_tokens = _unpack_kfac_entry(raw_stats[layer_name])
+        stats_dict[layer_name] = (A.cpu(), B.cpu(), n_tokens)
+    return stats_dict
+
+
+def _save_kfac_stats_dict(
+    cache_path: Path,
+    stats_dict: Dict[str, Tuple],
+    metadata: Optional[Dict] = None,
+) -> None:
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "metadata": metadata or {},
+        "stats": {
+            layer_name: {
+                "A": A.cpu(),
+                "B": B.cpu(),
+                "N": n_tokens,
+            }
+            for layer_name, (A, B, n_tokens) in stats_dict.items()
+        },
+    }
+    torch.save(payload, cache_path)
+
+
+def _merge_kfac_stats_dicts(
+    base_stats: Dict[str, Tuple],
+    task_stats: Dict[str, Tuple],
+    layer_names: List[str],
+    task_weight: float,
+) -> Dict[str, Tuple]:
+    task_weight = min(max(float(task_weight), 0.0), 1.0)
+    base_weight = 1.0 - task_weight
+    merged = {}
+    for layer_name in layer_names:
+        A_base, B_base, n_base = _unpack_kfac_entry(base_stats[layer_name])
+        A_task, B_task, n_task = _unpack_kfac_entry(task_stats[layer_name])
+        dtype = torch.float32
+        A_mix = base_weight * A_base.to(dtype=dtype) + task_weight * A_task.to(dtype=dtype)
+        B_mix = base_weight * B_base.to(dtype=dtype) + task_weight * B_task.to(dtype=dtype)
+        merged[layer_name] = (
+            A_mix,
+            B_mix,
+            {
+                "base_N": n_base,
+                "task_N": n_task,
+                "task_weight": task_weight,
+            },
+        )
+    return merged
 
 
 def get_topk_indices_by_energy_ratio(eigenvalues: torch.Tensor, percent: float = 0.9):
@@ -54,12 +166,15 @@ def compute_marginal_masks(
     Sb: torch.Tensor,
     Ub: torch.Tensor,
     energy_threshold: float,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    return_eigvals: bool = False,
+) -> Tuple[torch.Tensor, ...]:
     k_in, idx_in, threshold_in = get_topk_indices_by_energy_ratio(Sa, percent=energy_threshold)
     k_out, idx_out, threshold_out = get_topk_indices_by_energy_ratio(Sb, percent=energy_threshold)
 
     mask_a = Ua[:, idx_in].contiguous()
     mask_b = Ub[:, idx_out].contiguous()
+    eig_a = torch.clamp(Sa[idx_in], min=0.0).contiguous()
+    eig_b = torch.clamp(Sb[idx_out], min=0.0).contiguous()
 
     print(
         f"  mask_a: {k_in}/{Sa.shape[0]} safe dirs, "
@@ -69,30 +184,78 @@ def compute_marginal_masks(
         f"  mask_b: {k_out}/{Sb.shape[0]} safe dirs, "
         f"threshold_b={threshold_out:.6f}"
     )
+    if return_eigvals:
+        return mask_a, mask_b, eig_a, eig_b
     return mask_a, mask_b
 
 
 def build_lora_projection_cache(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    hparams: CrispLoRAHyperParams,
+    hparams: MyLoRAHyperParams,
     force_recompute: bool = False,
 ) -> Dict[str, Dict]:
-    print("[SchemeA] 计算各层KFac协方差统计...")
+    print("[build_lora_projection_cache] 计算各层KFac协方差统计...")
     # layer_names 与 CrispEdit 保持一致，key 含 .weight 后缀
     layer_names = [hparams.rewrite_module_tmp.format(l) for l in hparams.layers]
 
-    stats_dict = layer_stats_kfac_one_pass(
-        model=model,
-        tokenizer=tok,
-        layer_names=layer_names,
-        stats_dir=STATS_DIR,
-        ds_name=hparams.mom2_dataset,
-        to_collect=["mom2"],
-        sample_size=hparams.mom2_n_samples,
-        precision=hparams.mom2_dtype,
-        force_recompute=force_recompute,
+    task_kfac_cache_path = _resolve_cache_path(
+        getattr(hparams, "task_kfac_cache_path", None)
     )
+    base_kfac_cache_path = _resolve_cache_path(
+        getattr(hparams, "base_kfac_cache_path", None)
+    )
+    merged_kfac_cache_path = _resolve_cache_path(
+        getattr(hparams, "merged_kfac_cache_path", None)
+    )
+    if merged_kfac_cache_path is None:
+        merged_kfac_cache_path = _default_merged_kfac_cache_path(model, hparams)
+    task_kfac_weight = float(getattr(hparams, "task_kfac_weight", 0.0))
+
+    if (
+        task_kfac_cache_path is not None
+        and task_kfac_weight > 0
+        and merged_kfac_cache_path.exists()
+        and not force_recompute
+    ):
+        print(f"[SchemeA] 加载已融合 KFAC 缓存: {merged_kfac_cache_path}")
+        stats_dict = _load_kfac_stats_dict(merged_kfac_cache_path, layer_names)
+    else:
+        if base_kfac_cache_path is not None:
+            print(f"[SchemeA] 加载基础 KFAC 记忆: {base_kfac_cache_path}")
+            stats_dict = _load_kfac_stats_dict(base_kfac_cache_path, layer_names)
+        else:
+            stats_dict = _compute_pretrain_kfac_stats(
+                model, tok, layer_names, hparams, force_recompute
+            )
+
+        if task_kfac_cache_path is not None and task_kfac_weight > 0:
+            print(f"[SchemeA] 加载下游任务 KFAC 缓存: {task_kfac_cache_path}")
+            task_stats_dict = _load_kfac_stats_dict(task_kfac_cache_path, layer_names)
+            stats_dict = _merge_kfac_stats_dicts(
+                stats_dict,
+                task_stats_dict,
+                layer_names,
+                task_kfac_weight,
+            )
+            _save_kfac_stats_dict(
+                merged_kfac_cache_path,
+                stats_dict,
+                metadata={
+                    "source": "limit_grad_lora",
+                    "merge_rule": "A=(1-w)A_base+wA_task; B=(1-w)B_base+wB_task",
+                    "base_kfac_cache_path": (
+                        None if base_kfac_cache_path is None else str(base_kfac_cache_path)
+                    ),
+                    "task_kfac_cache_path": str(task_kfac_cache_path),
+                    "task_kfac_weight": task_kfac_weight,
+                    "mom2_dataset": hparams.mom2_dataset,
+                    "mom2_n_samples": hparams.mom2_n_samples,
+                    "mom2_dtype": hparams.mom2_dtype,
+                    "layers": hparams.layers,
+                },
+            )
+            print(f"[SchemeA] 已保存融合 KFAC 缓存: {merged_kfac_cache_path}")
 
     layer_to_proj_cache = {}
     for layer_num, layer_name in zip(hparams.layers, layer_names):
@@ -107,13 +270,17 @@ def build_lora_projection_cache(
         Sb, Ub = torch.linalg.eigh(B) 
 
         print(f"[SchemeA] 层 {layer_name} 边缘化掩码计算:")
-        mask_a, mask_b = compute_marginal_masks(Sa, Ua,Sb,Ub, hparams.energy_threshold)
+        mask_a, mask_b, eig_a, eig_b = compute_marginal_masks(
+            Sa, Ua, Sb, Ub, hparams.energy_threshold, return_eigvals=True
+        )
 
         layer_to_proj_cache[layer_name] = {
             "Ua": Ua.cpu(),
             "Ub": Ub.cpu(),
             "mask_a": mask_a.cpu(),
             "mask_b": mask_b.cpu(),
+            "eig_a": eig_a.cpu(),
+            "eig_b": eig_b.cpu(),
         }
         del A, B, Sa, Sb, Ua, Ub
         torch.cuda.empty_cache()
@@ -186,6 +353,7 @@ def map_proj_cache_to_lora_params(
             param_to_proj_cache[param] = {
                 "Ua":              cache["Ua"],
                 "mask_a":          cache["mask_a"],
+                "eig_a":           cache["eig_a"],
                 "leak_rate_param": leak_rate_param,
                 "param_type":      "lora_A",
             }
@@ -194,6 +362,7 @@ def map_proj_cache_to_lora_params(
             param_to_proj_cache[param] = {
                 "Ub":              cache["Ub"],
                 "mask_b":          cache["mask_b"],
+                "eig_b":           cache["eig_b"],
                 "leak_rate_param": leak_rate_param,
                 "param_type":      "lora_B",
             }
@@ -209,16 +378,14 @@ def map_proj_cache_to_lora_params(
 def wrap_model_and_build_projected_optimizer(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
-    hparams: CrispLoRAHyperParams,
+    hparams: MyLoRAHyperParams,
     force_recompute: bool = False,
 ):
-    # 1. KFac 边缘化投影缓存（挂 LoRA 之前，基于原始模型权重统计）
-    print("[GradLoRA] 1、计算 KFac 矩阵...")
+    print("1、计算 KFac 矩阵...")
     layer_to_proj_cache = build_lora_projection_cache(
         model, tok, hparams, force_recompute
     )
 
-    # 2. 挂载 LoRA 适配器
     print("2、挂载lora")
     model.config.use_cache = False
     model.enable_input_require_grads()
@@ -228,7 +395,7 @@ def wrap_model_and_build_projected_optimizer(
     elif hparams.lora_type == "adalora":
         ConfigClass = AdaLoraConfig
     else:
-        raise ValueError(f"不支持的 lora_type: {hparams.lora_type}")
+        raise ValueError(f"Unsupported lora_type: {hparams.lora_type}")
 
     peft_config = ConfigClass(
         task_type=TaskType.CAUSAL_LM,
@@ -242,18 +409,16 @@ def wrap_model_and_build_projected_optimizer(
     peft_model = get_peft_model(model, peft_config)
     peft_model.print_trainable_parameters()
 
-    # 3. 建立 param → 投影缓存的映射，同时注册 leak_rate_default 到各层 module
-    #    map_proj_cache_to_lora_params 返回 (param_to_proj_cache, leak_params)
+
     print("3、将之前计算的结果注册到lora的各层")
     param_to_proj_cache, leak_params = map_proj_cache_to_lora_params(
         peft_model, layer_to_proj_cache
     )
-    # 使用第二个优化器去优化泄露率参数
+
     lora_params = [p for p in peft_model.parameters() if p.requires_grad
                    and not any(p is lp for lp in leak_params)]
 
-    # 5. 构建优化器
-    #    optimizer_lora: ProjectedLoRAOptimizer，在 step 时自动做梯度软投影
+    print("4、创建优化器")
     optimizer_lora = ProjectedLoRAOptimizer(
         params=lora_params,
         projection_cache_map=param_to_proj_cache,
@@ -261,9 +426,14 @@ def wrap_model_and_build_projected_optimizer(
         weight_decay=hparams.weight_decay,
         projection_mode=hparams.projection_mode,
         use_leak=hparams.use_leak,
-        leak_rate=hparams.leak_rate
+        leak_rate=hparams.leak_rate,
+        newton_damping=getattr(hparams, "newton_damping", 1e-3),
+        use_dynamic_projection=getattr(hparams, "use_dynamic_projection", True),
+        dynamic_projection_beta=getattr(hparams, "dynamic_projection_beta", 0.95),
+        dynamic_projection_strength=getattr(hparams, "dynamic_projection_strength", 0.5),
+        dynamic_projection_min_scale=getattr(hparams, "dynamic_projection_min_scale", 0.2),
     )
-    #    optimizer_leak: 普通 Adam，学习率 ×2（与 limit_lora 保持一致）
+
     optimizer_leak = torch.optim.Adam(leak_params, lr=hparams.lr * 2)
 
     print(
@@ -281,7 +451,7 @@ def apply_limit_grad_lora_to_model(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
     requests: List[Dict],
-    hparams: CrispLoRAHyperParams,
+    hparams: MyLoRAHyperParams,
     return_orig_weights: bool = False,
     keep_original_weight: bool = False,
     **kwargs,
@@ -342,7 +512,7 @@ def _compute_loss(
     texts: List[str],
     targets: List[str],
     device: torch.device,
-    hparams: CrispLoRAHyperParams,
+    hparams: MyLoRAHyperParams,
 ) -> torch.Tensor:
     """
     计算编辑损失，参照 crispedit.py 的 execute_ft 训练循环：
