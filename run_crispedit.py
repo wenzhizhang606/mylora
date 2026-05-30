@@ -24,7 +24,7 @@ from easyeditor.models.crispedit.CrispEdit_hparams import CrispEditHyperParams
 # 临时使用
 from easyeditor.mymodels.hparams import CrispLoRAHyperParams
 
-from easyeditor.mymodels.hparams import MyLoRAHyperParams
+from easyeditor.mymodels import MyLoRAHyperParams
 
 from easyeditor.mymodels.crispedit_param import (
         CrispEditParamHyperParams,
@@ -115,6 +115,7 @@ def get_arguments():
     # 使用lora时，可以选择渗透部分
     parser.add_argument('--use_leak',action='store_true')
     parser.add_argument('--leak_rate',type=float, default=0.2)
+    parser.add_argument('--newton_damping',type=float, default=0.001)
 
     # --myedit  新参数
     parser.add_argument('--projection_method', type=str, default=None,

@@ -23,6 +23,7 @@ from easyeditor.models.crispedit.utils import (
 
 from easyeditor.mymodels import (
     CrispLoRAHyperParams,
+    MyLoRAHyperParams,
     apply_limit_grad_lora_to_model,
     build_lora_projection_cache,
     attach_curvature_lora_variant,
@@ -372,7 +373,7 @@ def execute_ft_grad_lora(
     model: AutoModelForCausalLM,
     tok: AutoTokenizer,
     requests: List[Dict],
-    hparams: CrispLoRAHyperParams,
+    hparams: MyLoRAHyperParams,
     **kwargs: Any,
 ) -> AutoModelForCausalLM:
     # 对于梯度进行投影

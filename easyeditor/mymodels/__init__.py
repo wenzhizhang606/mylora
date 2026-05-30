@@ -22,6 +22,7 @@ from .limit_grad_lora import (
     map_proj_cache_to_lora_params,
     wrap_model_and_build_projected_optimizer,
     apply_limit_grad_lora_to_model,
+    MyLoRAHyperParams,
     compute_marginal_masks
 )
 
@@ -59,6 +60,7 @@ __all__ = [
     # 超参数
     "CrispLoRAHyperParams",
     "SAFELoRAHyperParams",
+    "MyLoRAHyperParams",
     # 方案A
     "ProjectedLoRAOptimizer",
     "build_lora_projection_cache",
