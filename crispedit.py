@@ -377,7 +377,7 @@ def execute_ft_grad_lora(
     **kwargs: Any,
 ) -> AutoModelForCausalLM:
     # 对于梯度进行投影
-    print("[]进入execute_ft_grad_lora函数中......")
+    print("[2]进入execute_ft_grad_lora函数中......")
     return apply_limit_grad_lora_to_model(model,tok,requests,hparams)
     
     '''

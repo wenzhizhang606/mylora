@@ -24,13 +24,11 @@ from easyeditor.models.crispedit.CrispEdit_hparams import CrispEditHyperParams
 # 临时使用
 from easyeditor.mymodels.hparams import CrispLoRAHyperParams
 
-from easyeditor.mymodels import MyLoRAHyperParams
-
 from easyeditor.mymodels.crispedit_param import (
         CrispEditParamHyperParams,
-        execute_crispedit_param,
+        execute_crispedit_param
     )
-
+from easyeditor.mymodels import  MyLoRAHyperParams
 # 之后删除除了我的方法其余均调用edit.py
 from easyeditor.models.ft import FTHyperParams
 
@@ -140,7 +138,6 @@ def get_hparams(args):
         hparams.lora_rank = args.lora_rank
         hparams.lora_alpha = args.lora_alpha
         hparams.lr =args.lr
-        hparams.projection_method_lora = args.projection_method_lora
         if args.use_leak:
             hparams.use_leak = True
             hparams.leak_rate = args.leak_rate
@@ -199,7 +196,8 @@ def get_hparams(args):
 
 def calculate_model_name(args, hparams):
     if args.projection_method_lora is not None:
-        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}_{hparams.lr}"
+        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_\
+                    {args.cache_sample_num}_{hparams.lr}_{hparams.layers[0]}_{hparams.layers[-1]}"
     elif args.projection_method is not None:
         name = f"{args.model}_{args.projection_method}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
     elif args.perform_lora:
