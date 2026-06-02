@@ -12,7 +12,7 @@ from typing import List
 import numpy as np
 from transformers import AutoTokenizer
 from ..util import HyperParams
-from .evaluate_utils_vllm_gpt import (
+from .evaluate_utils_vllm import (
     test_seq2seq_batch_prediction_acc,
     test_batch_prediction_acc,
     test_prediction_acc,

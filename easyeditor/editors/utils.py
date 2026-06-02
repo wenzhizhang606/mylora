@@ -62,7 +62,7 @@ def summary_metrics(all_metrics, logs_dir: str):
     output_file = os.path.join(logs_dir, metrics_filename)
     with open(output_file, 'w', encoding="utf-8") as f:
         json.dump(mean_metrics, f, ensure_ascii=False, indent=4)
-    wandb.log(mean_metrics)
+    #wandb.log(mean_metrics)
 
 def _prepare_requests(prompts: Union[str, List[str]],
                       target_new: Union[str, List[str]],

@@ -196,8 +196,7 @@ def get_hparams(args):
 
 def calculate_model_name(args, hparams):
     if args.projection_method_lora is not None:
-        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_\
-                    {args.cache_sample_num}_{hparams.lr}_{hparams.layers[0]}_{hparams.layers[-1]}"
+        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}_{hparams.lr}_{hparams.layers[0]}_{hparams.layers[-1]}"
     elif args.projection_method is not None:
         name = f"{args.model}_{args.projection_method}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
     elif args.perform_lora:

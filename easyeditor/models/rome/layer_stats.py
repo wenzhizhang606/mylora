@@ -1337,8 +1337,9 @@ def get_shuffled_subset_texts(dataset, sample_size, seed=42):
     return shuffled_ds[:sample_size]['text']
 
 def load_zsre_ds(json_path):
+    print("[load_zsre_ds]load zsre ......")
     import json as _json
-    json_path = os.path.join("",json_path)
+    json_path = os.path.join("/home/zwz/01_crispedit/data",json_path)+".json"
     with open(json_path, "r", encoding="utf-8") as f:
         records = _json.load(f)
 

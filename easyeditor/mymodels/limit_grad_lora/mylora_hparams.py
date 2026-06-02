@@ -82,7 +82,7 @@ class MyLoRAHyperParams(HyperParams):
             config = yaml.safe_load(stream)
             config = super().construct_float_from_scientific_notation(config)
 
-        assert (config and config["alg_name"] == "BothLoRA") or print(
+        assert (config and config["alg_name"] == "MyLoRA") or print(
             f"MyLoRAHyperParams cannot load from {hparams_name_or_path}, "
             f"alg_name is {config['alg_name']}"
         )

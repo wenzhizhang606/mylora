@@ -11,7 +11,7 @@ from copy import deepcopy
 
 from .projected_lora_optimizer import ProjectedLoRAOptimizer
 from ...models.rome.layer_stats import layer_stats_kfac_one_pass
-from ..hparams.mylora_hparams import MyLoRAHyperParams
+from .mylora_hparams import MyLoRAHyperParams
 from ..tools import ExperimentTracker
 
 load_dotenv()
@@ -225,9 +225,11 @@ def build_lora_projection_cache(
             print(f"[SchemeA] 加载基础 KFAC 记忆: {base_kfac_cache_path}")
             stats_dict = _load_kfac_stats_dict(base_kfac_cache_path, layer_names)
         else:
+            #张文智：修改成为两步法
             stats_dict = _compute_pretrain_kfac_stats(
                 model, tok, layer_names, hparams, force_recompute
             )
+
 
         if task_kfac_cache_path is not None and task_kfac_weight > 0:
             print(f"[SchemeA] 加载下游任务 KFAC 缓存: {task_kfac_cache_path}")
@@ -262,9 +264,9 @@ def build_lora_projection_cache(
         A, B, _ = stats_dict.pop(layer_name)
         if not _is_llama_or_phi(hparams.model_name):
             A, B = B, A
-
-        A = A.to(dtype=torch.float32)
-        B = B.to(dtype=torch.float32)
+        print("正在进行特征分解......")
+        A = A.to("cuda",dtype=torch.float32)
+        B = B.to("cuda",dtype=torch.float32)
 
         Sa, Ua = torch.linalg.eigh(A)  
         Sb, Ub = torch.linalg.eigh(B) 

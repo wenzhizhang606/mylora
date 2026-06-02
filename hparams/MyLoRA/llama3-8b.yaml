@@ -25,7 +25,8 @@ max_length: 40
 objective_optimization: "target_new"
 
 # K-FAC
-mom2_dataset: "wikipedia"
+mom2_dataset: "zsre_mend_163k"
+#mom2_dataset: "wikipedia"
 mom2_n_samples: 10000
 mom2_dtype: "float32"
 energy_threshold: 0.5
@@ -55,7 +56,7 @@ norm_constraint: 0.0
 use_leak: false
 leak_rate: 0.1
 newton_damping: 1.0e-3
-use_dynamic_projection: true
+use_dynamic_projection: false
 dynamic_projection_beta: 0.95
 dynamic_projection_strength: 0.5
 dynamic_projection_min_scale: 0.2
