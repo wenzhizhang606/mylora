@@ -34,21 +34,6 @@ def _resolve_cache_path(path_like: Optional[str]) -> Optional[Path]:
     return path
 
 
-def _default_merged_kfac_cache_path(
-    model: AutoModelForCausalLM,
-    hparams: MyLoRAHyperParams,
-) -> Path:
-    model_name = model.config._name_or_path.rsplit("/")[-1]
-    task_tag = getattr(hparams, "task_kfac_tag", "task")
-    task_weight = float(getattr(hparams, "task_kfac_weight", 0.0))
-    sample_size = getattr(hparams, "mom2_n_samples", "all")
-    filename = (
-        f"{model_name}_{hparams.mom2_dataset}_{task_tag}_"
-        f"w{task_weight:g}_{hparams.mom2_dtype}_{sample_size}.pt"
-    )
-    root = Path(STATS_DIR) if STATS_DIR else Path(".")
-    return root / model_name / "merged_kfac" / filename
-
 
 def _compute_pretrain_kfac_stats(
     model: AutoModelForCausalLM,
@@ -70,24 +55,27 @@ def _compute_pretrain_kfac_stats(
     )
 
 
-def _unpack_kfac_entry(entry) -> Tuple[torch.Tensor, torch.Tensor, object]:
-    if isinstance(entry, dict):
-        return entry["A"], entry["B"], entry.get("N", entry.get("num_samples", None))
-    if isinstance(entry, (tuple, list)) and len(entry) >= 2:
-        n_tokens = entry[2] if len(entry) > 2 else None
-        return entry[0], entry[1], n_tokens
-    raise ValueError(f"Unsupported KFAC cache entry format: {type(entry)}")
 
+def _load_kfac_stats_dict(cache_path: Path, layer_names: List[str],dtype:str,size:int) -> Dict[str, Tuple]:
+    cache_path = Path(cache_path)
+    if not cache_path.exists():
+        raise FileNotFoundError(f"KFAC cache directory not found: {cache_path}")
+    if not cache_path.is_dir():
+        raise NotADirectoryError(f"KFAC cache path is not a directory: {cache_path}")
 
-def _load_kfac_stats_dict(cache_path: Path, layer_names: List[str]) -> Dict[str, Tuple]:
-    payload = torch.load(cache_path, map_location="cpu")
-    raw_stats = payload.get("stats", payload) if isinstance(payload, dict) else payload
+    cache_dtype = getattr(torch, dtype)
     stats_dict = {}
     for layer_name in layer_names:
-        if layer_name not in raw_stats:
+        
+        filename=cache_path / f"{layer_name}_{dtype}_kfac{size}.npz"
+        print(f"[_load_kfac_stats_dict]filepath:{filename}")
+        if filename.exists():
+            loaded = torch.load(filename, map_location='cpu')
+            stats_dict[layer_name] = (loaded['A'].to(dtype=cache_dtype), loaded['B'].to(dtype=cache_dtype), loaded['N'])
+        else:
             raise KeyError(f"KFAC cache {cache_path} missing layer {layer_name}")
-        A, B, n_tokens = _unpack_kfac_entry(raw_stats[layer_name])
-        stats_dict[layer_name] = (A.cpu(), B.cpu(), n_tokens)
+    
+    
     return stats_dict
 
 
@@ -97,43 +85,37 @@ def _save_kfac_stats_dict(
     metadata: Optional[Dict] = None,
 ) -> None:
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "metadata": metadata or {},
-        "stats": {
-            layer_name: {
-                "A": A.cpu(),
-                "B": B.cpu(),
-                "N": n_tokens,
-            }
-            for layer_name, (A, B, n_tokens) in stats_dict.items()
-        },
-    }
-    torch.save(payload, cache_path)
+
+    file_extension = f"{model_name}/{ds_name}_stats/{layer_name}_{precision}_kfac{size_suffix}.npz"
+    filename = stats_dir / file_extension
+    filename.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({'A': A, 'B': B, 'N': total_tokens}, filename)
 
 
 def _merge_kfac_stats_dicts(
+
+
+
+
     base_stats: Dict[str, Tuple],
     task_stats: Dict[str, Tuple],
     layer_names: List[str],
     task_weight: float,
+    dtype:str
 ) -> Dict[str, Tuple]:
     task_weight = min(max(float(task_weight), 0.0), 1.0)
     base_weight = 1.0 - task_weight
+    dtype = getattr(torch, dtype)
     merged = {}
     for layer_name in layer_names:
-        A_base, B_base, n_base = _unpack_kfac_entry(base_stats[layer_name])
-        A_task, B_task, n_task = _unpack_kfac_entry(task_stats[layer_name])
-        dtype = torch.float32
-        A_mix = base_weight * A_base.to(dtype=dtype) + task_weight * A_task.to(dtype=dtype)
-        B_mix = base_weight * B_base.to(dtype=dtype) + task_weight * B_task.to(dtype=dtype)
+        A_base, B_base, n_base = base_stats[layer_name]
+        A_task, B_task, n_task = task_stats[layer_name]
+        A_mix = base_weight * A_base.to("cuda",dtype=dtype) + task_weight * A_task.to("cuda",dtype=dtype)
+        B_mix = base_weight * B_base.to("cuda",dtype=dtype) + task_weight * B_task.to("cuda",dtype=dtype)
         merged[layer_name] = (
-            A_mix,
-            B_mix,
-            {
-                "base_N": n_base,
-                "task_N": n_task,
-                "task_weight": task_weight,
-            },
+            A_mix.to("cpu"),
+            B_mix.to("cpu"),
+            n_base+n_task
         )
     return merged
 
@@ -196,7 +178,6 @@ def build_lora_projection_cache(
     force_recompute: bool = False,
 ) -> Dict[str, Dict]:
     print("[build_lora_projection_cache] 计算各层KFac协方差统计...")
-    # layer_names 与 CrispEdit 保持一致，key 含 .weight 后缀
     layer_names = [hparams.rewrite_module_tmp.format(l) for l in hparams.layers]
 
     task_kfac_cache_path = _resolve_cache_path(
@@ -208,56 +189,40 @@ def build_lora_projection_cache(
     merged_kfac_cache_path = _resolve_cache_path(
         getattr(hparams, "merged_kfac_cache_path", None)
     )
-    if merged_kfac_cache_path is None:
-        merged_kfac_cache_path = _default_merged_kfac_cache_path(model, hparams)
     task_kfac_weight = float(getattr(hparams, "task_kfac_weight", 0.0))
+    cache_dtype = getattr(hparams, "mom2_n_dtype", "float32")
+    cache_size = int(getattr(hparams, "mom2_n_sample", 10000))
 
-    if (
-        task_kfac_cache_path is not None
-        and task_kfac_weight > 0
-        and merged_kfac_cache_path.exists()
-        and not force_recompute
-    ):
-        print(f"[SchemeA] 加载已融合 KFAC 缓存: {merged_kfac_cache_path}")
-        stats_dict = _load_kfac_stats_dict(merged_kfac_cache_path, layer_names)
+    if ( merged_kfac_cache_path.exists() and not force_recompute):
+        print(f"[build_lora_projection_cache] 加载已融合 KFAC 缓存: {merged_kfac_cache_path}")
+        stats_dict = _load_kfac_stats_dict(merged_kfac_cache_path, layer_names,cache_dtype,cache_size)
     else:
         if base_kfac_cache_path is not None:
-            print(f"[SchemeA] 加载基础 KFAC 记忆: {base_kfac_cache_path}")
-            stats_dict = _load_kfac_stats_dict(base_kfac_cache_path, layer_names)
+            print(f"[build_lora_projection_cache] 加载基础 KFAC 记忆: {base_kfac_cache_path}")
+            stats_dict = _load_kfac_stats_dict(base_kfac_cache_path, layer_names,cache_dtype,cache_size)
         else:
-            #张文智：修改成为两步法
+            #张文智：修改成为两步法.加载两个KFAC矩阵
             stats_dict = _compute_pretrain_kfac_stats(
                 model, tok, layer_names, hparams, force_recompute
             )
 
 
         if task_kfac_cache_path is not None and task_kfac_weight > 0:
-            print(f"[SchemeA] 加载下游任务 KFAC 缓存: {task_kfac_cache_path}")
-            task_stats_dict = _load_kfac_stats_dict(task_kfac_cache_path, layer_names)
+            print(f"[build_lora_projection_cache] 加载下游任务 KFAC 缓存: {task_kfac_cache_path}")
+            task_stats_dict = _load_kfac_stats_dict(task_kfac_cache_path, layer_names,cache_dtype,cache_size)
             stats_dict = _merge_kfac_stats_dicts(
                 stats_dict,
                 task_stats_dict,
                 layer_names,
                 task_kfac_weight,
+                cache_dtype,
             )
             _save_kfac_stats_dict(
                 merged_kfac_cache_path,
                 stats_dict,
-                metadata={
-                    "source": "limit_grad_lora",
-                    "merge_rule": "A=(1-w)A_base+wA_task; B=(1-w)B_base+wB_task",
-                    "base_kfac_cache_path": (
-                        None if base_kfac_cache_path is None else str(base_kfac_cache_path)
-                    ),
-                    "task_kfac_cache_path": str(task_kfac_cache_path),
-                    "task_kfac_weight": task_kfac_weight,
-                    "mom2_dataset": hparams.mom2_dataset,
-                    "mom2_n_samples": hparams.mom2_n_samples,
-                    "mom2_dtype": hparams.mom2_dtype,
-                    "layers": hparams.layers,
-                },
+                
             )
-            print(f"[SchemeA] 已保存融合 KFAC 缓存: {merged_kfac_cache_path}")
+            print(f"[build_lora_projection_cache] 已保存融合 KFAC 缓存: {merged_kfac_cache_path}")
 
     layer_to_proj_cache = {}
     for layer_num, layer_name in zip(hparams.layers, layer_names):

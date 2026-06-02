@@ -30,6 +30,9 @@ mom2_dataset: "zsre_mend_163k"
 mom2_n_samples: 10000
 mom2_dtype: "float32"
 energy_threshold: 0.5
+#base_kfac_cache_path: null
+#task_kfac_cache_path: null
+#task_kfac_weight: 0.0
 base_kfac_cache_path: null
 task_kfac_cache_path: null
 task_kfac_weight: 0.0

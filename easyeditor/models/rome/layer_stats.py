@@ -1185,7 +1185,7 @@ def calculate_cache_loss(
         #old
         #raw_ds = load_wiki_ds(ds_name)
         
-        raw_ds = load_wiki_ds(ds_name)
+        raw_ds = load_zsre_ds(ds_name)
         maxlen = get_max_length_from_model(model)
 
         if batch_tokens is not None and batch_tokens < maxlen:
