@@ -68,8 +68,8 @@ def execute_ft(
         for name, w in model.named_parameters():
             w.requires_grad = name in weights
     
-    old_loss = calculate_old_loss(model, tok, hparams)
-    ExperimentTracker.log(old_loss) # fine to log even if empty, basically no-op
+    #old_loss = calculate_old_loss(model, tok, hparams)
+    #ExperimentTracker.log(old_loss) # fine to log even if empty, basically no-op
     
     loss_meter = AverageMeter()
     pbar = trange(hparams.num_steps)
@@ -113,11 +113,16 @@ def execute_ft(
                 if should_recalculate:
                     opt = build_optimizer_with_cov_caches(model, hparams, [layer_to_cov_cache_old], opt=opt)
 
-        metrics = calculate_old_loss(model, tok, hparams)
-        metrics.update({f"FT Loss": loss_meter.avg})
+        #metrics = calculate_old_loss(model, tok, hparams)
+        #metrics.update({f"FT Loss": loss_meter.avg})
+        #ExperimentTracker.log(metrics) # fine to log even if empty, basically no-op
+
+        metrics = {"FT Loss": loss_meter.avg}
         ExperimentTracker.log(metrics) # fine to log even if empty, basically no-op
+        pbar.write(f"FT Loss: {loss_meter.avg:.4f}")
         
         pbar.set_postfix({"loss": f"{loss_meter.avg:.4f}"})
+
         if loss_meter.avg < 1e-2:
             break
     

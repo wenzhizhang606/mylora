@@ -30,12 +30,12 @@ mom2_dataset: "zsre_mend_163k"
 mom2_n_samples: 10000
 mom2_dtype: "float32"
 energy_threshold: 0.5
-#base_kfac_cache_path: null
-#task_kfac_cache_path: null
-#task_kfac_weight: 0.0
 base_kfac_cache_path: null
 task_kfac_cache_path: null
 task_kfac_weight: 0.0
+#base_kfac_cache_path: "/home/zwz/01_crispedit/Meta-Llama-3-8B-Instruct/wikipedia_stats"
+#task_kfac_cache_path: "/home/zwz/01_crispedit/Meta-Llama-3-8B-Instruct/zsre_mend_163k_stats"
+#task_kfac_weight: 0.2
 task_kfac_tag: "task"
 merged_kfac_cache_path: null
 

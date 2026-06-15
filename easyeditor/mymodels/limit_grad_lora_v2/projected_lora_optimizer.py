@@ -81,7 +81,20 @@ class ProjectedLoRAOptimizer(Adam):
                 new_cache["mask_b"] = cache["mask_b"].to(device=dev, dtype=dtype)
             if "eig_b" in cache:
                 new_cache["eig_b"] = cache["eig_b"].to(device=dev, dtype=dtype)
-
+            #begin:
+            if "task_Ua" in cache:
+                new_cache["task_Ua"]     = cache["task_Ua"].to(device=dev, dtype=dtype)
+            if "task_mask_a" in cache:
+                new_cache["task_mask_a"] = cache["task_mask_a"].to(device=dev, dtype=dtype)
+            if "task_eig_a" in cache:
+                new_cache["task_eig_a"] = cache["task_eig_a"].to(device=dev, dtype=dtype)
+            if "task_Ub" in cache:
+                new_cache["task_Ub"]     = cache["task_Ub"].to(device=dev, dtype=dtype)
+            if "task_mask_b" in cache:
+                new_cache["task_mask_b"] = cache["task_mask_b"].to(device=dev, dtype=dtype)
+            if "task_eig_b" in cache:
+                new_cache["task_eig_b"] = cache["task_eig_b"].to(device=dev, dtype=dtype)
+            #end
             # leak_rate_param：直接保留 nn.Parameter 引用（已在正确设备上）
             new_cache["leak_rate_param"] = cache.get("leak_rate_param", None)
 
@@ -121,9 +134,6 @@ class ProjectedLoRAOptimizer(Adam):
         # step 2：重新预加载新 cache
         self._preload_cache(new_projection_cache_map)
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 软投影核心
-    # ──────────────────────────────────────────────────────────────────────────
 
     def _project_grad(
         self,
@@ -134,43 +144,107 @@ class ProjectedLoRAOptimizer(Adam):
         param: Optional[torch.nn.Parameter] = None,
         adapt_projection: bool = False,
     ) -> Optional[torch.Tensor]:
+        leak_rate_param = cache.get("leak_rate_param", None)
+        if self.use_leak:
+            leak = torch.sigmoid(leak_rate_param.detach().to(device=grad.device, dtype=grad.dtype)) * self.leak_rate
+        else:
+            leak = torch.zeros(1, device=grad.device, dtype=grad.dtype)
+
         def _newton_strength(eigvals: torch.Tensor) -> torch.Tensor:
             eigvals = torch.clamp(eigvals.to(device=grad.device, dtype=grad.dtype), min=0.0)
             if eigvals.numel() == 0:
                 return eigvals
             damping_scale = self.newton_damping * eigvals.max().clamp(min=1e-12)
-            return eigvals / (eigvals + damping_scale)
+            return (1.0 - leak) * eigvals / (eigvals + damping_scale)
 
+        def _apply_dynamic_projection(
+            base_strength: torch.Tensor,
+            direction_coeffs: torch.Tensor,
+            reduce_dim: int,
+            state_key: str,
+        ) -> torch.Tensor:
+            if (
+                not self.use_dynamic_projection
+                or param is None
+                or base_strength.numel() == 0
+                or self.dynamic_projection_strength <= 0
+            ):
+                return base_strength
+
+            direction_energy = (
+                direction_coeffs.detach()
+                .to(dtype=torch.float32)
+                .pow(2)
+                .mean(dim=reduce_dim)
+            )
+            state = self.state[param]
+            ema = state.get(state_key, None)
+            if ema is None or ema.shape != direction_energy.shape:
+                ema = torch.zeros_like(direction_energy)
+
+            if adapt_projection:
+                beta = self.dynamic_projection_beta
+                ema.mul_(beta).add_(direction_energy, alpha=1.0 - beta)
+                state[state_key] = ema
+
+            task_score = ema / ema.max().clamp(min=1e-12)
+            keep_scale = 1.0 - self.dynamic_projection_strength * task_score
+            keep_scale = keep_scale.clamp(
+                min=self.dynamic_projection_min_scale,
+                max=1.0,
+            )
+            return base_strength * keep_scale.to(device=grad.device, dtype=grad.dtype)
 
         if param_type == "lora_A":
             if mode not in ("marginal_A", "marginal_AB"):
                 return None
             if "Ua" not in cache or "mask_a" not in cache:
                 return None
+            mask_a = cache["mask_a"]   # (d_in, k_in)，列为高曲率特征向量
+            task_mask_a=cache["task_mask_a"]
+            task_eig_a = cache.get("task_eig_a", None)
+            # 1
+            grad_high = grad @ (mask_a @ mask_a.T)
+            grad = grad - (1.0 - leak) * grad_high
 
-            mask_a = cache["mask_a"]
-            eig_a = cache.get("eig_a", None)
-
-
-            direction_coeffs = grad @ mask_a
-            delete_strength = _newton_strength(eig_a)
-
-            grad_high = (direction_coeffs * delete_strength.unsqueeze(0)) @ mask_a.T
+            direction_coeffs = grad @ task_mask_a
+            delete_strength = _newton_strength(task_eig_a)
+            delete_strength = _apply_dynamic_projection(
+                delete_strength,
+                direction_coeffs,
+                reduce_dim=0,
+                state_key="dynamic_projection_ema_a",
+            )
+            grad_high = (direction_coeffs * delete_strength.unsqueeze(0)) @ task_mask_a.T
             grad_proj = grad - grad_high
+
             return grad_proj
 
         elif param_type == "lora_B":
+            # lora_B: (d_out, r)，对输出方向做左投影
             if mode not in ("marginal_B", "marginal_AB"):
                 return None
             if "Ub" not in cache or "mask_b" not in cache:
                 return None
-            mask_b = cache["mask_b"] 
-            eig_b = cache.get("eig_b", None)
+            mask_b = cache["mask_b"]   # (d_in, k_in)，列为高曲率特征向量
 
-            direction_coeffs = mask_b.T @ grad
-            delete_strength = _newton_strength(eig_b)
-            grad_high = mask_b @ (delete_strength.unsqueeze(-1) * direction_coeffs)
+            task_mask_b=cache["task_mask_b"]
+            task_eig_b = cache.get("task_eig_b", None)
+
+            grad_high = (mask_b @ mask_b.T) @ grad
+            grad = grad - (1.0 - leak) * grad_high
+
+            direction_coeffs = task_mask_b.T @ grad
+            delete_strength = _newton_strength(task_eig_b)
+            delete_strength = _apply_dynamic_projection(
+                delete_strength,
+                direction_coeffs,
+                reduce_dim=1,
+                state_key="dynamic_projection_ema_b",
+            )
+            grad_high = task_mask_b @ (delete_strength.unsqueeze(-1) * direction_coeffs)
             grad_proj = grad - grad_high
+
             return grad_proj
 
         else:

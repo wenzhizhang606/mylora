@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 import yaml
 
 from ...util.hparams import HyperParams
@@ -32,6 +32,23 @@ class CrispEditHyperParams(HyperParams):
     mom2_n_samples: int
     mom2_dtype: str
     energy_threshold: float
+
+    # Projection/KFAC cache paths
+    base_kfac_cache_path: Optional[str] = None
+    task_kfac_cache_path: Optional[str] = None
+    additional_kfac_cache_path: Optional[str] = None
+    second_kfac_cache_path: Optional[str] = None
+    second_projection_kfac_cache_path: Optional[str] = None
+    projection_cache_path: Optional[str] = None
+    base_projection_cache_path: Optional[str] = None
+    primary_projection_cache_path: Optional[str] = None
+    task_projection_cache_path: Optional[str] = None
+    additional_projection_cache_path: Optional[str] = None
+    second_projection_cache_path: Optional[str] = None
+
+    # Projection controls
+    use_second_projection: bool = True
+    newton_damping: float = 1e-3
 
     # Defaults
     batch_size: int = 64

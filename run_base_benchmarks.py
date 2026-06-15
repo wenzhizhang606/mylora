@@ -250,12 +250,16 @@ if __name__ =="__main__":
             batch_size=config['batch_size'],
             apply_chat_template=args.apply_chat_template,
             fewshot_as_multiturn=args.apply_chat_template,
+            random_seed=SEED,
+            numpy_random_seed=SEED,
+            torch_random_seed=SEED,
+            fewshot_random_seed=SEED,
             #confirm_run_unsafe_code=True,  
         )
 
         if "results" in _results:
             results["results"].update(_results["results"])
-            ExperimentTracker.log(_results["results"]) # 现在 tracker 已被正确引用
+            ExperimentTracker.log(_results["results"])
         else:
             print(f"Warning: no results found for task {task_name}")
 

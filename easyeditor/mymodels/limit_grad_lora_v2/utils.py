@@ -67,7 +67,7 @@ def _load_kfac_stats_dict(cache_path: Path, layer_names: List[str],dtype:str,siz
     stats_dict = {}
     for layer_name in layer_names:
         
-        filename=cache_path / f"{layer_name}_{dtype}_kfac{size}.npz"
+        filename=cache_path / f"{layer_name}_{dtype}_kfac_{size}.npz"
         print(f"[_load_kfac_stats_dict]filepath:{filename}")
         if filename.exists():
             loaded = torch.load(filename, map_location='cpu')
@@ -78,7 +78,7 @@ def _load_kfac_stats_dict(cache_path: Path, layer_names: List[str],dtype:str,siz
     
     return stats_dict
 
-
+'''
 def _save_kfac_stats_dict(
     cache_path: Path,
     stats_dict: Dict[str, Tuple],
@@ -90,13 +90,9 @@ def _save_kfac_stats_dict(
     filename = stats_dir / file_extension
     filename.parent.mkdir(parents=True, exist_ok=True)
     torch.save({'A': A, 'B': B, 'N': total_tokens}, filename)
-
+'''
 
 def _merge_kfac_stats_dicts(
-
-
-
-
     base_stats: Dict[str, Tuple],
     task_stats: Dict[str, Tuple],
     layer_names: List[str],
@@ -201,7 +197,6 @@ def build_lora_projection_cache(
             print(f"[build_lora_projection_cache] 加载基础 KFAC 记忆: {base_kfac_cache_path}")
             stats_dict = _load_kfac_stats_dict(base_kfac_cache_path, layer_names,cache_dtype,cache_size)
         else:
-            #张文智：修改成为两步法.加载两个KFAC矩阵
             stats_dict = _compute_pretrain_kfac_stats(
                 model, tok, layer_names, hparams, force_recompute
             )
@@ -210,18 +205,20 @@ def build_lora_projection_cache(
         if task_kfac_cache_path is not None and task_kfac_weight > 0:
             print(f"[build_lora_projection_cache] 加载下游任务 KFAC 缓存: {task_kfac_cache_path}")
             task_stats_dict = _load_kfac_stats_dict(task_kfac_cache_path, layer_names,cache_dtype,cache_size)
-            stats_dict = _merge_kfac_stats_dicts(
-                stats_dict,
-                task_stats_dict,
-                layer_names,
-                task_kfac_weight,
-                cache_dtype,
-            )
-            _save_kfac_stats_dict(
-                merged_kfac_cache_path,
-                stats_dict,
-                
-            )
+            #begin：修改成为两步法.加载两个KFAC矩阵
+            #stats_dict = _merge_kfac_stats_dicts(
+            #    stats_dict,
+            #    task_stats_dict,
+            #    layer_names,
+            #    task_kfac_weight,
+            #    cache_dtype,
+            #)
+            #end
+
+            #_save_kfac_stats_dict(
+            #    merged_kfac_cache_path,
+            #    stats_dict,
+            #)
             print(f"[build_lora_projection_cache] 已保存融合 KFAC 缓存: {merged_kfac_cache_path}")
 
     layer_to_proj_cache = {}
@@ -229,17 +226,37 @@ def build_lora_projection_cache(
         A, B, _ = stats_dict.pop(layer_name)
         if not _is_llama_or_phi(hparams.model_name):
             A, B = B, A
+
+        #begin：修改成为两步法.加载两个KFAC矩阵
+        task_A,task_B, task_=task_stats_dict.pop(layer_name)
+        if not _is_llama_or_phi(hparams.model_name):
+            task_A, task_B = task_B, task_A
+        #end
+
         print("正在进行特征分解......")
         A = A.to("cuda",dtype=torch.float32)
         B = B.to("cuda",dtype=torch.float32)
-
         Sa, Ua = torch.linalg.eigh(A)  
         Sb, Ub = torch.linalg.eigh(B) 
 
-        print(f"[SchemeA] 层 {layer_name} 边缘化掩码计算:")
+        #begin：修改成为两步法.加载两个KFAC矩阵
+        task_A = task_A.to("cuda",dtype=torch.float32)
+        task_B = task_B.to("cuda",dtype=torch.float32)
+        task_Sa, task_Ua = torch.linalg.eigh(task_A)  
+        task_Sb, task_Ub = torch.linalg.eigh(task_B) 
+        #end
+
+
+        print(f"[build_lora_projection_cache] 层 {layer_name} 边缘化掩码计算:")
         mask_a, mask_b, eig_a, eig_b = compute_marginal_masks(
             Sa, Ua, Sb, Ub, hparams.energy_threshold, return_eigvals=True
         )
+
+        #begin：修改成为两步法.加载两个KFAC矩阵
+        task_mask_a, task_mask_b, task_eig_a, task_eig_b = compute_marginal_masks(
+            task_Sa, task_Ua, task_Sb, task_Ub, hparams.energy_threshold, return_eigvals=True
+        )
+        #end
 
         layer_to_proj_cache[layer_name] = {
             "Ua": Ua.cpu(),
@@ -248,8 +265,19 @@ def build_lora_projection_cache(
             "mask_b": mask_b.cpu(),
             "eig_a": eig_a.cpu(),
             "eig_b": eig_b.cpu(),
+            #begin：修改成为两步法.加载两个KFAC矩阵
+            "task_Ua": task_Ua.cpu(),
+            "task_Ub": task_Ub.cpu(),
+            "task_mask_a": task_mask_a.cpu(),
+            "task_mask_b": task_mask_b.cpu(),
+            "task_eig_a": task_eig_a.cpu(),
+            "task_eig_b": task_eig_b.cpu(),
+            #end
         }
         del A, B, Sa, Sb, Ua, Ub
+        #begin：修改成为两步法.加载两个KFAC矩阵
+        del task_A, task_B, task_Sa, task_Sb, task_Ua, task_Ub
+        #end
         torch.cuda.empty_cache()
 
     return layer_to_proj_cache
@@ -316,20 +344,28 @@ def map_proj_cache_to_lora_params(
         cache = layer_to_proj_cache[matched_layer]
 
         if "lora_A" in name:
-            # lora_A: (r, d_in)，右投影，使用 Ua + mask_a
             param_to_proj_cache[param] = {
                 "Ua":              cache["Ua"],
                 "mask_a":          cache["mask_a"],
                 "eig_a":           cache["eig_a"],
+                #begin：修改成为两步法.加载两个KFAC矩阵
+                "task_Ua":          cache["task_Ua"],
+                "task_mask_a":      cache["task_mask_a"],
+                "task_eig_a":       cache["task_eig_a"],
+                #end
                 "leak_rate_param": leak_rate_param,
                 "param_type":      "lora_A",
             }
         elif "lora_B" in name:
-            # lora_B: (d_out, r)，左投影，使用 Ub + mask_b
             param_to_proj_cache[param] = {
                 "Ub":              cache["Ub"],
                 "mask_b":          cache["mask_b"],
                 "eig_b":           cache["eig_b"],
+                #begin：修改成为两步法.加载两个KFAC矩阵
+                "task_Ub":          cache["task_Ub"],
+                "task_mask_b":      cache["task_mask_b"],
+                "task_eig_b":       cache["task_eig_b"],
+                #end
                 "leak_rate_param": leak_rate_param,
                 "param_type":      "lora_B",
             }
@@ -395,7 +431,7 @@ def wrap_model_and_build_projected_optimizer(
         use_leak=hparams.use_leak,
         leak_rate=hparams.leak_rate,
         newton_damping=getattr(hparams, "newton_damping", 1e-3),
-        use_dynamic_projection=getattr(hparams, "use_dynamic_projection", True),
+        use_dynamic_projection=getattr(hparams, "use_dynamic_projection", False),
         dynamic_projection_beta=getattr(hparams, "dynamic_projection_beta", 0.95),
         dynamic_projection_strength=getattr(hparams, "dynamic_projection_strength", 0.5),
         dynamic_projection_min_scale=getattr(hparams, "dynamic_projection_min_scale", 0.2),

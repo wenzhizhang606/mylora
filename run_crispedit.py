@@ -173,7 +173,7 @@ def get_hparams(args):
     hparams.disable_old_loss_check = args.disable_old_loss_check
     hparams.edit_cache_style = args.edit_cache_style
     hparams.perform_lora = args.perform_lora
-
+    hparams.lr = args.lr
     assert not (not args.no_crisp and args.perform_lora), \
         "We don't currently support using CrispEdit and LoRA together. " \
         "Please set --no_crisp if you want to use LoRA."
@@ -196,7 +196,7 @@ def get_hparams(args):
 
 def calculate_model_name(args, hparams):
     if args.projection_method_lora is not None:
-        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}_{hparams.lr}_{hparams.layers[0]}_{hparams.layers[-1]}"
+        name = f"{args.model}_{args.projection_method_lora}_{hparams.lora_rank}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}_{hparams.lr}"#_{hparams.layers[0]}_{hparams.layers[-1]}"
     elif args.projection_method is not None:
         name = f"{args.model}_{args.projection_method}_{args.data_type}_{args.energy_threshold}_{args.cache_sample_num}"
     elif args.perform_lora:
@@ -208,7 +208,7 @@ def calculate_model_name(args, hparams):
         return name.replace('.', '_')
     else:
         name = (f"{args.model}_{args.alg_name}_{args.data_type}"
-                f"_{args.energy_threshold}_{hparams.mom2_n_samples}")
+                f"_{args.energy_threshold}_{hparams.mom2_n_samples}_{hparams.lr}")
 
     if args.sequential_edit:
         name += f"_sequential_{args.num_edits}"
