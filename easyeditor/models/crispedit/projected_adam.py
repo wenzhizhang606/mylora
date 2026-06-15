@@ -171,18 +171,42 @@ class ProjectedAdam(Adam):
                 if p.grad is None or p.grad.ndim != 2:
                     continue
 
+                grad_proj = None
                 if p in cache_map:
+                    cache = cache_map[p]
+                    has_task_projection = all(
+                        key in cache
+                        for key in ("task_mask_a", "task_mask_b", "task_eig_a", "task_eig_b")
+                    )
+                    print(
+                        "[ProjectedAdam.step] primary projection "
+                        f"shape={tuple(p.grad.shape)} "
+                        f"use_second_projection={use_second_projection} "
+                        f"has_task_newton={has_task_projection}"
+                    )
                     grad_proj = self._project_tensor(
                         p.grad,
-                        cache_map[p],
+                        cache,
                         apply_task=use_second_projection,
+                    )
+                    print(
+                        "[ProjectedAdam.step] primary projection done "
+                        f"projected={grad_proj is not None}"
                     )
 
                 if use_second_projection and p in additional_cache_map:
                     source_grad = grad_proj if grad_proj is not None else p.grad
+                    print(
+                        "[ProjectedAdam.step] additional newton projection "
+                        f"shape={tuple(source_grad.shape)}"
+                    )
                     task_projected = self._newton_project(source_grad, additional_cache_map[p])
                     if task_projected is not None:
                         grad_proj = task_projected
+                    print(
+                        "[ProjectedAdam.step] additional newton projection done "
+                        f"projected={task_projected is not None}"
+                    )
 
                 if grad_proj is not None:
                     p.grad.copy_(grad_proj)
