@@ -24,3 +24,5 @@ run_3.sh
 run_4.sh
 .claude/
 Qwen2.5-7B-Instruct/
+AGENTS.md
+.codex/

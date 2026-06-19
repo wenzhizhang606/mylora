@@ -463,8 +463,7 @@ def layer_stats_kfac_one_pass(
 
     # --- 2. Dataset and Batching Logic (Restored from original) ---
     def get_ds():
-        raw_ds = load_wiki_ds(ds_name)
-
+        raw_ds = load_stats_ds(ds_name)
         maxlen = get_max_length_from_model(model) # Ensure this helper is imported
         if batch_tokens is not None and batch_tokens < maxlen:
             maxlen = batch_tokens
@@ -1179,8 +1178,8 @@ def calculate_cache_loss(
     """
 
     def get_ds():
-        raw_ds = load_wiki_ds(ds_name)
-
+        # todo:计算损失时加载那种数据
+        raw_ds = load_stats_ds(ds_name)
         maxlen = get_max_length_from_model(model)
 
         if batch_tokens is not None and batch_tokens < maxlen:
@@ -1312,15 +1311,44 @@ def create_text_dataset(text_list):
     return Dataset.from_dict(data_dict)
 
 def load_wiki_ds(ds_name):
-    print("="*50)
-    print(ds_name,"          ",CACHE_DIR)
+    print(f"[load_wiki_ds] dataset_name:{ds_name},cache_dir:{CACHE_DIR}")
 
-    raw_ds = load_dataset(
-            "/data1/zwz/dataset/wikipedia",
-            dict(wikitext="wikitext-103-raw-v1", wikipedia="20220301.en")[ds_name],
+    dataset_names = {
+        "wikitext": ("wikitext", "wikitext-103-raw-v1"),
+        "wikipedia": ("wikipedia", "20220301.en"),
+    }
+    dataset_name, config_name = dataset_names[ds_name]
+
+    raw_ds = None
+    if CACHE_DIR:
+        cache_root = Path(CACHE_DIR)
+        local_candidates = [
+            cache_root / ds_name,
+        ]
+        for candidate in local_candidates:
+            if not candidate.exists():
+                continue
+            try:
+                print(f"[load_wiki_ds] Loading local dataset script from {candidate}")
+                raw_ds = load_dataset(
+                        str(candidate),
+                        config_name,
+                        trust_remote_code=True,
+                        cache_dir=CACHE_DIR,
+                        download_mode="reuse_cache_if_exists",
+                    )
+                break
+            except Exception as exc:
+                print(f"[load_wiki_ds] Skipping local candidate {candidate}: {exc}")
+
+    if raw_ds is None:
+        print(f"[load_wiki_ds] Local dataset not found; loading {dataset_name}/{config_name}")
+        raw_ds = load_dataset(
+            dataset_name,
+            config_name,
             trust_remote_code=True,
             cache_dir=CACHE_DIR,
-            download_mode="reuse_cache_if_exists"
+            download_mode="reuse_cache_if_exists",
         )
 
     raw_ds = raw_ds["train"].train_test_split(test_size=0.001, seed=69, shuffle=True)
@@ -1330,3 +1358,35 @@ def load_wiki_ds(ds_name):
 def get_shuffled_subset_texts(dataset, sample_size, seed=42):
     shuffled_ds = dataset.shuffle(seed=seed)
     return shuffled_ds[:sample_size]['text']
+
+
+def load_stats_ds(ds_name):
+    if ds_name in ("wikipedia", "wikitext"):
+        return load_wiki_ds(ds_name)
+    return load_zsre_ds(ds_name)
+
+
+def load_zsre_ds(json_path):
+    print("[load_zsre_ds]load zsre ......")
+    import json as _json
+
+    data_dir = os.getenv("EDIT_DATA_DIR")
+    json_path = Path(json_path)
+    if json_path.suffix != ".json":
+        json_path = json_path.with_suffix(".json")
+    if not json_path.is_absolute():
+        json_path = Path(data_dir) / json_path
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        records = _json.load(f)
+
+    data_dict = {
+        "id":    [str(i) for i in range(len(records))],
+        "url":   [""] * len(records),
+        "title": [r.get("subject", "") for r in records],
+        "text":  [r.get("src", "") + " " + r.get("pred", "") for r in records],
+    }
+    full_ds = Dataset.from_dict(data_dict)
+    split = full_ds.train_test_split(test_size=0.001, seed=69, shuffle=True)
+    split["val"] = split.pop("test")
+    return split
