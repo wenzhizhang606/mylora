@@ -40,7 +40,7 @@ def _ensure_crispedit_defaults(hparams) -> None:
 
 def _is_llama_or_phi(model_name: str) -> bool:
     lower = str(model_name).lower()
-    return "llama" in lower or "phi" in lower
+    return "llama" in lower or "phi" in lower or "qwen" in lower
 
 
 def _model_device(model) -> torch.device:

@@ -12,3 +12,5 @@ CUDA_VISIBLE_DEVICES=3 python run_edited_benchmarks_gpt.py --edited_model_dir ll
 
 #eval
 python run_edited_benchmarks.py --edited_model_dir llama3-8b_crispedit_zsre_0_5_10000 --model_name llama3-8b --max_length 40 --no_wandb --context_type no_context --alg_name Base --data_type zsre  --eval_num 3000  --evaluation_criteria llm_judge --no_wandb
+
+turn对应先牛顿,再硬投影

@@ -463,11 +463,8 @@ def layer_stats_kfac_one_pass(
 
     # --- 2. Dataset and Batching Logic (Restored from original) ---
     def get_ds():
-        #old
-        #raw_ds = load_wiki_ds(ds_name)
+        raw_ds = load_wiki_ds(ds_name)
 
-        #目前使用绝对路劲写死在程序中
-        raw_ds=load_zsre_ds(ds_name)
         maxlen = get_max_length_from_model(model) # Ensure this helper is imported
         if batch_tokens is not None and batch_tokens < maxlen:
             maxlen = batch_tokens
@@ -1182,10 +1179,8 @@ def calculate_cache_loss(
     """
 
     def get_ds():
-        #old
-        #raw_ds = load_wiki_ds(ds_name)
-        
-        raw_ds = load_zsre_ds(ds_name)
+        raw_ds = load_wiki_ds(ds_name)
+
         maxlen = get_max_length_from_model(model)
 
         if batch_tokens is not None and batch_tokens < maxlen:
@@ -1335,21 +1330,3 @@ def load_wiki_ds(ds_name):
 def get_shuffled_subset_texts(dataset, sample_size, seed=42):
     shuffled_ds = dataset.shuffle(seed=seed)
     return shuffled_ds[:sample_size]['text']
-
-def load_zsre_ds(json_path):
-    print("[load_zsre_ds]load zsre ......")
-    import json as _json
-    json_path = os.path.join("/home/zwz/01_crispedit/data",json_path)+".json"
-    with open(json_path, "r", encoding="utf-8") as f:
-        records = _json.load(f)
-
-    data_dict = {
-        "id":    [str(i) for i in range(len(records))],
-        "url":   [""] * len(records),
-        "title": [r.get("subject", "") for r in records],
-        "text":  [r.get("src", "") + " " + r.get("pred", "") for r in records],
-    }
-    full_ds = Dataset.from_dict(data_dict)
-    split = full_ds.train_test_split(test_size=0.001, seed=69, shuffle=True)
-    split["val"] = split.pop("test")
-    return split
