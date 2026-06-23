@@ -133,7 +133,7 @@ class ProjectedAdam(Adam):
     ):
         if cache is None or tensor.ndim != 2:
             return None
-        
+        '''
         # 先牛顿,再硬投影
         if apply_task:
             task_projected = self._newton_project(tensor, cache, prefix="task_")
@@ -144,7 +144,7 @@ class ProjectedAdam(Adam):
         if result is None:
             result = tensor
         '''
-        # 先后硬再牛顿
+        # 先硬投影，再牛顿
         result = self._hard_project(tensor, cache)
         #result = self._newton_project(tensor, cache)
         if result is None:
@@ -155,7 +155,7 @@ class ProjectedAdam(Adam):
             task_projected = self._newton_project(result, cache, prefix="task_")
             if task_projected is not None:
                 result = task_projected
-        '''
+        
         return result
 
     @torch.no_grad()
