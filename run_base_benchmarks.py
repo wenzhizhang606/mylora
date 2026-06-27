@@ -14,7 +14,7 @@ print("HF_DATASETS_DIR =", os.getenv("HF_DATASETS_DIR"))
 
 import numpy as np
 import torch
-import wandb
+from easyeditor.mymodels.tools.tracker import ExperimentTracker
 from lm_eval import simple_evaluate
 
 HF_DATASETS_DIR = os.getenv("HF_DATASETS_DIR")
@@ -158,15 +158,13 @@ def main():
         "tasks": args.tasks,
     }
 
-    run = None
-    if not args.no_wandb:
-        run = wandb.init(
-            project=args.wandb_project,
-            name=run_name,
-            config=run_config,
-            resume="must" if args.wandb_run_id else None,
-            id=args.wandb_run_id,
-        )
+    ExperimentTracker.init(
+        project=args.wandb_project,
+        name=run_name,
+        config=run_config,
+        mode=(not args.no_wandb),
+    )
+
 
     model_args = build_vllm_model_args(args, model_path)
     print(f"Loading vLLM via lm_eval with model_args={model_args}")
@@ -176,12 +174,17 @@ def main():
     tasks_with_config = build_task_config(args)
 
     for task_name, config in tasks_with_config.items():
-        print(f"Running {task_name} (Shots: {config['shots']}, Batch: {config['batch_size']})...")
+        task_limit = args.eval_num if task_name == "mmlu" else None
+        limit_label = task_limit if task_limit is not None else "full"
+        print(
+            f"Running {task_name} "
+            f"(Shots: {config['shots']}, Batch: {config['batch_size']}, Limit: {limit_label})..."
+        )
         task_results = simple_evaluate(
             model="vllm",
             model_args=model_args,
             tasks=[task_name],
-            limit=args.eval_num,
+            limit=task_limit,
             num_fewshot=config["shots"],
             batch_size=config["batch_size"],
             max_batch_size=args.max_batch_size,
@@ -197,8 +200,7 @@ def main():
             raise ValueError(f"No results found for task {task_name}")
 
         results["results"].update(task_results["results"])
-        if run is not None:
-            wandb.log(task_results["results"])
+        ExperimentTracker.log(task_results["results"])
 
     log_dir = Path("logs") / run_name
     result_path = save_results(results, log_dir)
@@ -206,11 +208,7 @@ def main():
     print(f"Raw results saved to: {result_path}")
     print(f"End Capability Eval Time: {elapsed:.2f}s")
 
-    if run is not None:
-        artifact = wandb.Artifact("raw_results", type="dataset")
-        artifact.add_file(str(result_path))
-        run.log_artifact(artifact)
-        run.finish()
+    ExperimentTracker.finish()
 
 
 if __name__ == "__main__":

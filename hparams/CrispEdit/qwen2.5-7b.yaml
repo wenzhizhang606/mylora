@@ -29,9 +29,9 @@ mom2_n_samples: 1000
 mom2_dtype: "float32"
 energy_threshold: 0.99
 
-base_kfac_cache_path: "/home/zwz/01_crispedit/Qwen2.5-7B-Instruct/wikipedia_stats"
-task_kfac_cache_path: "/home/zwz/01_crispedit/Qwen2.5-7B-Instruct/zsre_mend_163k_stats"
-projection_cache_path: null
-task_projection_cache_path: null
-newton_damping:  1e-3
-use_second_projection: True
+#base_kfac_cache_path: "/home/zwz/01_crispedit/Qwen2.5-7B-Instruct/wikipedia_stats"
+#task_kfac_cache_path: "/home/zwz/01_crispedit/Qwen2.5-7B-Instruct/zsre_mend_163k_stats"
+#projection_cache_path: null
+#task_projection_cache_path: null
+#newton_damping:  1e-3
+#use_second_projection: True
