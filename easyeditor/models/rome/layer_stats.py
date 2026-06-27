@@ -1363,7 +1363,8 @@ def get_shuffled_subset_texts(dataset, sample_size, seed=42):
 def load_stats_ds(ds_name):
     if ds_name in ("wikipedia", "wikitext"):
         return load_wiki_ds(ds_name)
-    return load_zsre_ds(ds_name)
+    elif ds_name in ("zsre_mend_163k"):
+        return load_zsre_ds(ds_name)
 
 
 def load_zsre_ds(json_path):
