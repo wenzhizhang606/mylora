@@ -62,7 +62,9 @@ def execute_ft(
         model, opt = wrap_model_with_lora_and_return_opt(model, hparams)
         current_weights_cpu = None #my code gets uglier with each day
     else:
+        print("[1]\n\n\n")
         opt = build_optimizer_with_cov_caches(model, hparams, [layer_to_cov_cache_old])
+        print("[2]\n\n\n")
         weights = get_weights(model, hparams, bias=True)
         current_weights_cpu = cache_weights_to_cpu(weights)
         for name, w in model.named_parameters():
@@ -73,7 +75,7 @@ def execute_ft(
     
     loss_meter = AverageMeter()
     pbar = trange(hparams.num_steps)
-
+    print("[3]\n\n\n")
     for it in pbar:
         loss_meter.reset()
 
@@ -87,7 +89,6 @@ def execute_ft(
         ):
             inputs_targets = [txt_ + tgt_ for txt_, tgt_ in zip(txt, tgt)]
             encodings = tok(inputs_targets, return_tensors="pt", padding=True, truncation=True, max_length=hparams.max_length).to(device)
-
             labels = encodings["input_ids"].clone()
 
             labels[labels == tok.pad_token_id] = -100
@@ -99,7 +100,6 @@ def execute_ft(
             loss = outputs.loss
                 
             loss_meter.update(loss.item(), n=labels.size(0))
-            
             if loss.item() >= 1e-2:
                 loss.backward()
                 opt.step()
@@ -112,7 +112,6 @@ def execute_ft(
                 )
                 if should_recalculate:
                     opt = build_optimizer_with_cov_caches(model, hparams, [layer_to_cov_cache_old], opt=opt)
-
         #metrics = calculate_old_loss(model, tok, hparams)
         #metrics.update({f"FT Loss": loss_meter.avg})
         #ExperimentTracker.log(metrics) # fine to log even if empty, basically no-op
