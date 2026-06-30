@@ -3,6 +3,7 @@ from typing import Dict, Optional, Tuple
 import torch
 from torch.optim import Adam
 
+
 class ProjectedAdam(Adam):
     """
     第 3.2 节 K-FAC 软约束更新对应的 Adam 包装器。
@@ -25,17 +26,10 @@ class ProjectedAdam(Adam):
 
     _PRECOMPUTED_BASIS_KEYS = (
         ("soft_q_a", "soft_q_b", "soft_eig_a", "soft_eig_b"),
-        ("gen_q_a", "gen_q_b", "gen_eig_a", "gen_eig_b"),
-        ("q_a", "q_b", "a", "b"),
-        ("Q_A", "Q_B", "a", "b"),
     )
 
     _FACTOR_KEY_SETS = (
         (("edit_A", "edit_B"), ("cap_A", "cap_B")),
-        (("edit_a", "edit_b"), ("cap_a", "cap_b")),
-        (("Ae", "Be"), ("Ac", "Bc")),
-        (("A_e", "B_e"), ("A_c", "B_c")),
-        (("task_A", "task_B"), ("A", "B")),
     )
 
     def __init__(
@@ -71,7 +65,6 @@ class ProjectedAdam(Adam):
 
         self.factor_damping = max(float(factor_damping), 0.0)
         self.cache_generalized_basis = bool(cache_generalized_basis)
-        self._debug_step = 0
 
     def reset_cache_old(self, new_projection_cache_map):
         self.reset_cache(new_projection_cache_map)
@@ -282,41 +275,22 @@ class ProjectedAdam(Adam):
             # 该值越大，高能力曲率方向上的梯度收缩越强。
             soft_lambda = group.get("soft_lambda", 1.0)
 
-            debug_stats = {
-                "total_params": 0,
-                "matrix_grads": 0,
-                "skipped_no_grad": 0,
-                "skipped_non_matrix": 0,
-                "primary_hit": 0,
-                "primary_miss": 0,
-                "primary_applied": 0,
-                "primary_failed": 0,
-                "additional_hit": 0,
-                "additional_applied": 0,
-                "additional_failed": 0,
-                "updated": 0,
-            }
             debug_samples = []
 
             for p in group["params"]:
-                debug_stats["total_params"] += 1
                 if p.grad is None:
-                    debug_stats["skipped_no_grad"] += 1
                     continue
                 if p.grad.ndim != 2:
-                    debug_stats["skipped_non_matrix"] += 1
                     # 只有矩阵权重才有 K-FAC A/B 因子。
                     # bias、标量以及没有梯度的参数会退回普通 Adam 行为。
                     continue
 
-                debug_stats["matrix_grads"] += 1
                 grad_norm = None
                 if len(debug_samples) < 3:
                     grad_norm = p.grad.detach().float().norm().item()
 
                 grad_proj = None
                 if p in cache_map:
-                    debug_stats["primary_hit"] += 1
                     # 第一分支：使用主缓存执行第 3.2 节的 K-FAC 软求解。
                     # 如果缓存不完整，辅助函数会返回 None，
                     # 此处不会修改该参数的梯度。
@@ -325,15 +299,9 @@ class ProjectedAdam(Adam):
                         cache_map[p],
                         soft_lambda=soft_lambda,
                     )
-                    if grad_proj is None:
-                        debug_stats["primary_failed"] += 1
-                    else:
-                        debug_stats["primary_applied"] += 1
-                else:
-                    debug_stats["primary_miss"] += 1
 
+                # 当前不会进入
                 if p in additional_cache_map:
-                    debug_stats["additional_hit"] += 1
                     # 第二分支：可选地再执行一次软求解。
                     # 如果主分支已经生成梯度，就基于该结果继续；
                     # 否则从原始梯度开始。
@@ -344,12 +312,9 @@ class ProjectedAdam(Adam):
                         soft_lambda=soft_lambda,
                     )
                     if additional_proj is not None:
-                        debug_stats["additional_applied"] += 1
                         # 只有额外缓存可用时才覆盖结果。
                         # 如果第二个缓存缺少必要因子，就保留主分支结果。
                         grad_proj = additional_proj
-                    else:
-                        debug_stats["additional_failed"] += 1
 
                 if grad_proj is not None:
                     if len(debug_samples) < 3:
@@ -365,35 +330,10 @@ class ProjectedAdam(Adam):
                     # 因此这里原地写回预条件化后的梯度，
                     # 让 Adam 的动量从投影/软求解后的梯度更新。
                     p.grad.copy_(grad_proj)
-                    debug_stats["updated"] += 1
-            '''
-            print(
-                "[ProjectedAdam] "
-                f"step={self._debug_step} group={group_idx} "
-                f"soft_lambda={soft_lambda} "
-                f"primary_cache={len(cache_map)} "
-                f"additional_cache={len(additional_cache_map)} "
-                f"total_params={debug_stats['total_params']} "
-                f"matrix_grads={debug_stats['matrix_grads']} "
-                f"skipped_no_grad={debug_stats['skipped_no_grad']} "
-                f"skipped_non_matrix={debug_stats['skipped_non_matrix']} "
-                f"primary_hit={debug_stats['primary_hit']} "
-                f"primary_miss={debug_stats['primary_miss']} "
-                f"primary_applied={debug_stats['primary_applied']} "
-                f"primary_failed={debug_stats['primary_failed']} "
-                f"additional_hit={debug_stats['additional_hit']} "
-                f"additional_applied={debug_stats['additional_applied']} "
-                f"additional_failed={debug_stats['additional_failed']} "
-                f"updated={debug_stats['updated']}"
-            )
             for sample_idx, sample in enumerate(debug_samples):
                 print(
                     "[ProjectedAdam] "
                     f"step={self._debug_step} group={group_idx} "
                     f"sample_{sample_idx}: {sample}"
                 )
-                '''
-
-        # 使用可能已被替换的梯度运行标准 Adam。
         return super().step(closure)
-
