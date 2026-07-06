@@ -1332,7 +1332,7 @@ def load_wiki_ds(ds_name):
                 print(f"[load_wiki_ds] Loading local dataset script from {candidate}")
                 raw_ds = load_dataset(
                         str(candidate),
-                        config_name,
+                        #config_name,
                         trust_remote_code=True,
                         cache_dir=CACHE_DIR,
                         download_mode="reuse_cache_if_exists",
