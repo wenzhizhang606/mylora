@@ -1,4 +1,4 @@
-from dataclasses import MISSING, dataclass, fields
+from dataclasses import dataclass
 from typing import List, Optional
 
 import yaml
@@ -90,25 +90,14 @@ class CrispEditHyperParams(HyperParams):
             f'alg_name is {config["alg_name"]} '
         )
 
-        known_fields = {field.name: field for field in fields(cls)}
+        # 用 __dataclass_fields__ 替代 fields()，无需额外 import fields
+        known_field_names = set(cls.__dataclass_fields__.keys())
         init_config = {
-            key: value for key, value in config.items() if key in known_fields
+            key: value for key, value in config.items() if key in known_field_names
         }
-        missing_required = [
-            name
-            for name, field in known_fields.items()
-            if field.default is MISSING
-            and field.default_factory is MISSING
-            and name not in init_config
-        ]
-        if missing_required:
-            raise KeyError(
-                "Missing required CrispEdit hparams: "
-                + ", ".join(sorted(missing_required))
-            )
 
         hparams = cls(**init_config)
         for key, value in config.items():
-            if key not in known_fields:
+            if key not in known_field_names:
                 setattr(hparams, key, value)
         return hparams

@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from peft import AdaLoraConfig, LoraConfig, TaskType, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+# 注意：运行前需将此文件重命名为 utils_gen_pro.py
 from .projected_adam import  ProjectedAdam
 from ..rome.layer_stats import (
     calculate_cache_loss,

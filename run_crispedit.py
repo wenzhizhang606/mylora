@@ -50,7 +50,7 @@ def get_arguments():
                                  'safeedit_train', 'safeedit_test'])
     #new
     parser.add_argument('--alg_name', required=True, type=str, default='lora',
-                        choices=['crispedit',"myedit","lora",'mylora','FT'])
+                        choices=['crispedit',"myedit","lora",'mylora','FT','myeditpro'])
     parser.add_argument('--cache_sample_num', type=int, default=10000,
                         help='Number of samples to use for caching projection matrices.')
     parser.add_argument('--edit_sample_num', type=int, default=1000,
@@ -160,6 +160,21 @@ def get_hparams(args):
         hparams.lr = args.lr
 
         return hparams
+    elif args.alg_name == "myeditpro":
+        print(f"[run_gen_pro] 加载 Gen Pro 配置")
+        hparams = CrispEditHyperParams.from_hparams(
+            f"./hparams/CrispEdit/{args.model}"
+        )
+        hparams.batch_size = args.batch_size
+        hparams.energy_threshold = args.energy_threshold
+        hparams.mom2_n_samples = args.cache_sample_num
+        hparams.lr = args.lr
+        # Gen Pro 专属参数（有默认值，也可从 YAML 加载）
+        hparams.kl_factor = getattr(hparams, 'kl_factor', 0.01)
+        hparams.nullspace_threshold = getattr(hparams, 'nullspace_threshold', 0.02)
+        hparams.L2 = getattr(hparams, 'L2', 1.0)
+        hparams.kl_interval = getattr(hparams, 'kl_interval', 1)
+        return hparams
 
     print(f"[run_crispedit] 加载 CrispEdit 配置")
     hparams = CrispEditHyperParams.from_hparams(f"./hparams/CrispEdit/{args.model}")
@@ -208,7 +223,7 @@ def calculate_model_name(args, hparams):
         return name.replace('.', '_')
     else:
         name = (f"{args.model}_{args.alg_name}_{args.data_type}"
-                f"_{args.energy_threshold}_{hparams.mom2_n_samples}_{hparams.lr}_wiki_zsre")
+                f"_{args.energy_threshold}_{hparams.mom2_n_samples}_{hparams.lr}_pro")
 
     if args.sequential_edit:
         name += f"_sequential_{args.num_edits}"
@@ -273,6 +288,8 @@ if __name__ == "__main__":
     elif args.alg_name == "FT":
         print("[1]进行全量微调......")
         edited_model = execute_finetune(model, tokenizer, requests, hparams)
+    elif args.alg_name == "myeditpro":
+         edited_model = execute_ft_pro(model, tokenizer, requests, hparams)
     else:
         print("[1]进行Crispedit方法微调......")
         edited_model = execute_ft(model, tokenizer, requests, hparams)

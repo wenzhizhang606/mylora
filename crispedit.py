@@ -666,3 +666,162 @@ def execute_finetune(
 ) -> AutoModelForCausalLM:
     print("进入execute_finetune函数 ......")
     return apply_simple_finetune(model, tok, requests, hparams)
+
+
+def execute_ft_pro(
+    model,
+    tok,
+    requests: List[Dict],
+    hparams,
+    **kwargs,
+):
+    """改进版 execute_ft：集成 KL 散度正则 + 闭式残差修正。
+
+    相比原始 execute_ft 的改进：
+    1. 训练前初始化 KL 锚点正则化器，记录原始输出分布
+    2. 每步训练加入 KL 锚点损失，防止输出分布漂移
+    3. 迭代收敛后执行闭式残差修正，补齐编辑残差
+
+    参数:
+        model: 模型
+        tok: tokenizer
+        requests: 编辑请求列表
+        hparams: 超参数（额外支持 kl_factor, nullspace_threshold, L2 等）
+
+    返回:
+        model: 编辑后的模型
+    """
+    from easyeditor.models.crispedit.projected_adam import KLDivergenceRegularizer,precompute_null_space_projections,closed_form_residual_correction
+
+    print("[execute_ft_pro] 进入改进版执行函数")
+    device = model.device
+    if tok.padding_side != "right":
+        tok.padding_side = "right"
+
+    requests = deepcopy(requests)
+    for i, request in enumerate(requests):
+        if request["target_new"] and request["target_new"][0] != " ":
+            requests[i]["target_new"] = " " + request["target_new"]
+
+    # === 计算协方差缓存 ===
+    layer_to_cov_cache_old = calculate_cov_cache_with_old_data(
+        model, tok, hparams, force_recompute=False
+    )
+
+    opt = build_optimizer_with_cov_caches(model, hparams, [layer_to_cov_cache_old])
+    weights = get_weights(model, hparams, bias=True)
+    current_weights_cpu = cache_weights_to_cpu(weights)
+    for name, w in model.named_parameters():
+        w.requires_grad = name in weights
+
+    # === 改进 1：初始化 KL 锚点正则化器 ===
+    kl_factor = getattr(hparams, "kl_factor", 0.01)
+    kl_reg = KLDivergenceRegularizer(
+        model, tok,
+        anchor_texts=None,  # 使用默认锚点
+        max_length=hparams.max_length,
+        device=device,
+    )
+    print(f"[execute_ft_pro] KL 正则系数: {kl_factor}")
+
+    # === 改进 2：预计算零空间投影矩阵 P ===
+    nullspace_threshold = getattr(hparams, "nullspace_threshold", 2e-2)
+    P_list = precompute_null_space_projections(
+        model, tok, hparams,
+        cov_cache=layer_to_cov_cache_old,
+        nullspace_threshold=nullspace_threshold,
+    )
+
+    # 初始化 cache_c（用于连续编辑的键累积）
+    cache_c = [None] * len(hparams.layers)
+
+    # === 训练循环 ===
+    loss_meter = _AverageMeter()
+    pbar = trange(hparams.num_steps)
+    kl_interval = getattr(hparams, "kl_interval", 1)  # 每隔几步计算一次 KL
+
+    for it in pbar:
+        loss_meter.reset()
+        random.shuffle(requests)
+        texts = [r["prompt"] for r in requests]
+        targets = [r["target_new"] for r in requests]
+
+        for txt, tgt in zip(
+            chunks(texts, hparams.batch_size), chunks(targets, hparams.batch_size)
+        ):
+            inputs_targets = [txt_ + tgt_ for txt_, tgt_ in zip(txt, tgt)]
+            encodings = tok(
+                inputs_targets, return_tensors="pt", padding=True,
+                truncation=True, max_length=hparams.max_length,
+            ).to(device)
+            labels = encodings["input_ids"].clone()
+            labels[labels == tok.pad_token_id] = -100
+            for i_p, prompt in enumerate(txt):
+                prompt_len = len(
+                    tok(prompt, add_special_tokens=True, truncation=True,
+                        max_length=hparams.max_length)["input_ids"]
+                )
+                labels[i_p, :prompt_len] = -100
+
+            opt.zero_grad(set_to_none=True)
+            outputs = model(**encodings, labels=labels)
+            edit_loss = outputs.loss
+
+            # 改进 1：加入 KL 锚点损失（仅前半段训练启用，后半段关闭让编辑自由收敛）
+            kl_active_steps = hparams.num_steps // 2
+            if kl_factor > 0 and it < kl_active_steps and it % kl_interval == 0:
+                kl_loss = kl_reg.compute_loss(model)
+                total_loss = edit_loss + kl_factor * kl_loss
+            else:
+                total_loss = edit_loss
+                kl_loss = torch.tensor(0.0, device=device)
+
+            loss_meter.update(edit_loss.item(), n=labels.size(0))
+
+            # 收敛阈值仅看 edit_loss，不受 KL 残留影响
+            if edit_loss.item() >= 1e-2:
+                total_loss.backward()
+                opt.step()
+                current_weights_cpu, layer_to_cov_cache_old, should_recalculate = \
+                    recalculate_cov_cache_if_weights_changed(
+                        model, tok, hparams, current_weights_cpu, layer_to_cov_cache_old,
+                    )
+                if should_recalculate:
+                    opt = build_optimizer_with_cov_caches(
+                        model, hparams, [layer_to_cov_cache_old], opt=opt
+                    )
+
+        metrics = {"FT Loss": loss_meter.avg, "KL Loss": kl_loss.item()}
+        pbar.write(f"Step {it}: FT Loss={loss_meter.avg:.4f}, KL Loss={kl_loss.item():.4f}")
+        pbar.set_postfix({"loss": f"{loss_meter.avg:.4f}", "kl": f"{kl_loss.item():.4f}"})
+
+        if loss_meter.avg < 1e-2:
+            break
+
+    # === 改进 2：闭式残差修正 ===
+    L2 = getattr(hparams, "L2", 1.0)
+    model = closed_form_residual_correction(
+        model, tok, requests, hparams, P_list, cache_c=cache_c, L2=L2
+    )
+
+    print("[execute_ft_pro] 编辑完成")
+    return model
+
+
+class _AverageMeter:
+    """ Computes and stores the average and current value """
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
