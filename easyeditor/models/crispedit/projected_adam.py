@@ -1,9 +1,13 @@
 import json
+import os
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import torch
+from dotenv import load_dotenv
 from torch.optim import Adam
+
+load_dotenv()
 
 
 class ProjectedAdam(Adam):
@@ -61,6 +65,8 @@ class ProjectedAdam(Adam):
         ),
         factor_stats_sample_size: int = 0,
         factor_stats_json_path: Optional[str] = None,
+        debug_grad_norm_stats: bool = True,
+        grad_norm_stats_json_path: Optional[str] = None,
     ):
         super().__init__(
             params,
@@ -100,6 +106,16 @@ class ProjectedAdam(Adam):
             "sample_size": self.factor_stats_sample_size,
             "layers": [],
         }
+
+        # 梯度范数统计：保存路径与 utils.py 一致（STATS_DIR），文件名不同。
+        self.debug_grad_norm_stats = bool(debug_grad_norm_stats)
+        _stats_dir = os.getenv("STATS_DIR")
+        _grad_norm_dir = Path(_stats_dir) if _stats_dir else repo_root
+        self.grad_norm_stats_json_path = Path(
+            grad_norm_stats_json_path or _grad_norm_dir / "projected_adam_grad_norm_stats.json"
+        )
+        self._grad_norm_step = 0
+        self._grad_norm_records = {"steps": []}
 
     def reset_cache_old(self, new_projection_cache_map):
         self.reset_cache(new_projection_cache_map)
@@ -409,6 +425,47 @@ class ProjectedAdam(Adam):
         })
         self._save_factor_stats()
 
+    def _save_grad_norm_stats(self):
+        self.grad_norm_stats_json_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.grad_norm_stats_json_path.open("w", encoding="utf-8") as handle:
+            json.dump(self._grad_norm_records, handle, indent=2, sort_keys=True)
+
+    def _record_grad_norm(
+        self,
+        cache: Optional[Dict],
+        grad_before: torch.Tensor,
+        grad_after: Optional[torch.Tensor],
+    ):
+        if not self.debug_grad_norm_stats:
+            return
+
+        before_flat = grad_before.detach().float().reshape(-1)
+        before_norm = before_flat.norm().item()
+        if grad_after is None:
+            after_norm = None
+            norm_ratio = None
+            cosine = None
+        else:
+            after_flat = grad_after.detach().float().reshape(-1)
+            after_norm = after_flat.norm().item()
+            norm_ratio = (after_norm / before_norm) if before_norm > 0 else None
+            denom = before_norm * after_norm
+            cosine = (
+                torch.dot(before_flat, after_flat).item() / denom
+                if denom > 0 else None
+            )
+
+        layer_name = cache.get("layer_name", "<unknown>") if cache else "<unknown>"
+        self._grad_norm_records["steps"].append({
+            "step": self._grad_norm_step,
+            "layer_name": str(layer_name),
+            "grad_norm_before": before_norm,
+            "grad_norm_after": after_norm,
+            "norm_ratio": norm_ratio,
+            "cosine_sim": cosine,
+        })
+        self._save_grad_norm_stats()
+
     def _soft_kfac_precondition(
         self,
         tensor: torch.Tensor,
@@ -451,6 +508,8 @@ class ProjectedAdam(Adam):
             with torch.enable_grad():
                 loss = closure()
 
+        self._grad_norm_step += 1
+
         for group in self.param_groups:
             # 主缓存是每个参数对应的主要 K-FAC 软约束缓存。
             # 按 PDF 中的记号，它应包含 H_e 和 H_c 因子，
@@ -478,11 +537,13 @@ class ProjectedAdam(Adam):
                     # 第一分支：使用主缓存执行第 3.2 节的 K-FAC 软求解。
                     # 如果缓存不完整，辅助函数会返回 None，
                     # 此处不会修改该参数的梯度。
+                    _grad_before = p.grad.detach()
                     grad_proj = self._soft_kfac_precondition(
                         p.grad,
                         cache_map[p],
                         soft_lambda=soft_lambda,
                     )
+                    self._record_grad_norm(cache_map[p], _grad_before, grad_proj)
 
                 # 当前不会进入
                 if p in additional_cache_map:
