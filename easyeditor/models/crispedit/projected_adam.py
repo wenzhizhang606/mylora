@@ -235,14 +235,28 @@ class ProjectedAdam(Adam):
         eps = self.factor_damping * trace_scale
         edit_factor_reg = edit_factor + eps * torch.eye(n, device=edit_factor.device, dtype=edit_factor.dtype)
 
+        # 条件数统计：阻尼前后对比，诊断 edit_factor 病态程度与阻尼效果
+        eigvals = torch.linalg.eigvalsh(edit_factor)
+        cond = eigvals.max() / eigvals.clamp(min=1e-20).min()
+        eigvals_reg = torch.linalg.eigvalsh(edit_factor_reg)
+        cond_reg = eigvals_reg.max() / eigvals_reg.clamp(min=1e-20).min()
+        print(f"条件数(阻尼前): {cond.item():.2e}  条件数(阻尼后): {cond_reg.item():.2e}")
+
         # Cholesky做广义特征分解
         L = torch.linalg.cholesky(edit_factor_reg)
-        L_inv = torch.linalg.solve_triangular(L, torch.eye(n, device=L.device, dtype=L.dtype), upper=False)
+        # 原实现：显式构造 L_inv 再做稠密矩阵乘（保留备查）
+        # L_inv = torch.linalg.solve_triangular(L, torch.eye(n, device=L.device, dtype=L.dtype), upper=False)
+        #
+        # whitened_cap = self._symmetrize(L_inv @ cap_factor @ L_inv.T)
+        # q = L_inv.T @ cap_vecs
 
-        whitened_cap = self._symmetrize(L_inv @ cap_factor @ L_inv.T)
+        # 不显式构造 L_inv，直接对 cap_factor 做两次三角回代
+        tmp = torch.linalg.solve_triangular(L, cap_factor, upper=False)        # 解 L @ tmp = cap_factor
+        whitened_cap = torch.linalg.solve_triangular(L, tmp.T, upper=False).T  # 解 L @ X.T = tmp.T  =>  L^{-1} cap_factor L^{-T}
         cap_eigs, cap_vecs = torch.linalg.eigh(whitened_cap)
 
-        q = L_inv.T @ cap_vecs
+        # q = L^{-T} @ cap_vecs，用三角回代避免 L_inv（解 L^T @ q = cap_vecs，L^T 为上三角）
+        q = torch.linalg.solve_triangular(L.transpose(-1, -2), cap_vecs, upper=True)
         cap_eigs = torch.clamp(cap_eigs, min=0.0)
 
         if not torch.isfinite(q).all() or not torch.isfinite(cap_eigs).all():
