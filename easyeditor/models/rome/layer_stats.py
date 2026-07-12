@@ -6,7 +6,7 @@ from datasets import Dataset
 from typing import List
 
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -1311,42 +1311,57 @@ def create_text_dataset(text_list):
     return Dataset.from_dict(data_dict)
 
 def load_wiki_ds(ds_name):
-    print(f"[load_wiki_ds] dataset_name:{ds_name},cache_dir:{CACHE_DIR}")
+    print(f"[load_wiki_ds] dataset_name:{ds_name}, cache_dir:{CACHE_DIR}")
 
+    # wikipedia 已迁移到 wikimedia/wikipedia（parquet，无需加载脚本）；
+    # 旧的 ("wikipedia", "20220301.en") 配置已被下架，会直接报错。
     dataset_names = {
         "wikitext": ("wikitext", "wikitext-103-raw-v1"),
-        "wikipedia": ("wikipedia", "20220301.en"),
+        "wikipedia": ("wikimedia/wikipedia", "20231101.en"),
     }
     dataset_name, config_name = dataset_names[ds_name]
 
     raw_ds = None
     if CACHE_DIR:
         cache_root = Path(CACHE_DIR)
+        # 本地候选目录：兼容多种命名（ds_name 或 dataset_name 的 / 替换为 _）。
         local_candidates = [
             cache_root / ds_name,
+            cache_root / dataset_name.replace("/", "_"),
         ]
         for candidate in local_candidates:
             if not candidate.exists():
                 continue
+            # 1) 优先按 save_to_disk 格式加载（之前用 save_to_disk 保存的目录）。
             try:
-                print(f"[load_wiki_ds] Loading local dataset script from {candidate}")
-                raw_ds = load_dataset(
-                        str(candidate),
-                        #config_name,
-                        trust_remote_code=True,
-                        cache_dir=CACHE_DIR,
-                        download_mode="reuse_cache_if_exists",
-                    )
+                print(f"[load_wiki_ds] Trying load_from_disk: {candidate}")
+                raw_ds = load_from_disk(str(candidate))
+                print(f"[load_wiki_ds] Loaded via load_from_disk: {candidate}")
                 break
             except Exception as exc:
-                print(f"[load_wiki_ds] Skipping local candidate {candidate}: {exc}")
+                print(f"[load_wiki_ds] load_from_disk failed for {candidate}: {exc}")
+            # 2) 回退：把目录下所有 parquet 文件作为数据源加载。
+            parquet_files = sorted(candidate.rglob("*.parquet"))
+            if parquet_files:
+                try:
+                    print(f"[load_wiki_ds] Trying parquet files in {candidate} "
+                          f"({len(parquet_files)} files)")
+                    raw_ds = load_dataset(
+                        "parquet",
+                        data_files={"train": [str(p) for p in parquet_files]},
+                        cache_dir=CACHE_DIR,
+                    )
+                    print(f"[load_wiki_ds] Loaded via parquet: {candidate}")
+                    break
+                except Exception as exc:
+                    print(f"[load_wiki_ds] parquet load failed for {candidate}: {exc}")
 
     if raw_ds is None:
-        print(f"[load_wiki_ds] Local dataset not found; loading {dataset_name}/{config_name}")
+        print(f"[load_wiki_ds] Local dataset not found; loading "
+              f"{dataset_name}/{config_name} from Hub")
         raw_ds = load_dataset(
             dataset_name,
             config_name,
-            trust_remote_code=True,
             cache_dir=CACHE_DIR,
             download_mode="reuse_cache_if_exists",
         )
