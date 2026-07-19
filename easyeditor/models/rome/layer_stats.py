@@ -1313,14 +1313,47 @@ def create_text_dataset(text_list):
 def load_wiki_ds(ds_name):
     print(f"[load_wiki_ds] dataset_name:{ds_name}, cache_dir:{CACHE_DIR}")
 
-    # wikipedia 已迁移到 wikimedia/wikipedia（parquet，无需加载脚本）；
-    # 旧的 ("wikipedia", "20220301.en") 配置已被下架，会直接报错。
     dataset_names = {
         "wikitext": ("wikitext", "wikitext-103-raw-v1"),
-        "wikipedia": ("wikimedia/wikipedia", "20231101.en"),
+        #"wikipedia": ("wikimedia/wikipedia", "20231101.en"),
+        "wikipedia": ("wikipedia", "20220301.en"),
     }
     dataset_name, config_name = dataset_names[ds_name]
+    
+    raw_ds = None
+    if CACHE_DIR:
+        cache_root = Path(CACHE_DIR)
+        local_candidates = [
+            cache_root / ds_name,
+        ]
+        for candidate in local_candidates:
+            if not candidate.exists():
+                continue
+            try:
+                print(f"[load_wiki_ds] Loading local dataset script from {candidate}")
+                raw_ds = load_dataset(
+                        str(candidate),
+                        #config_name,
+                        trust_remote_code=True,
+                        cache_dir=CACHE_DIR,
+                    )
+                break
+            except Exception as exc:
+                print(f"[load_wiki_ds] Skipping local candidate {candidate}: {exc}")
 
+    if raw_ds is None:
+        print(f"[load_wiki_ds] Local dataset not found; loading {dataset_name}/{config_name}")
+        raw_ds = load_dataset(
+            dataset_name,
+            config_name,
+            trust_remote_code=True,
+            cache_dir=CACHE_DIR,
+        )
+
+    raw_ds = raw_ds["train"].train_test_split(test_size=0.001, seed=69, shuffle=True)
+    raw_ds['val'] = raw_ds.pop("test")
+    return raw_ds
+    '''
     raw_ds = None
     if CACHE_DIR:
         cache_root = Path(CACHE_DIR)
@@ -1369,6 +1402,7 @@ def load_wiki_ds(ds_name):
     raw_ds = raw_ds["train"].train_test_split(test_size=0.001, seed=69, shuffle=True)
     raw_ds['val'] = raw_ds.pop("test")
     return raw_ds
+    '''
 
 def get_shuffled_subset_texts(dataset, sample_size, seed=42):
     shuffled_ds = dataset.shuffle(seed=seed)
@@ -1376,10 +1410,17 @@ def get_shuffled_subset_texts(dataset, sample_size, seed=42):
 
 
 def load_stats_ds(ds_name):
-    if ds_name in ("wikipedia", "wikitext"):
-        return load_wiki_ds(ds_name)
-    elif ds_name in ("zsre_mend_163k"):
+    name = str(ds_name).lower()
+    if name in ("wikipedia", "wikitext"):
+        return load_wiki_ds(name)
+    if name in ("counterfact-edit_3k",):
+        return load_counterfact_ds(ds_name)
+    if name in ("zsre", "zsre_mend_163k"):
         return load_zsre_ds(ds_name)
+    raise ValueError(
+        f"Unsupported K-FAC dataset '{ds_name}'. Expected wikipedia, wikitext, "
+        "counterfact or zsre_mend_163k."
+    )
 
 
 def load_zsre_ds(json_path):
@@ -1397,10 +1438,35 @@ def load_zsre_ds(json_path):
         records = _json.load(f)
 
     data_dict = {
-        "id":    [str(i) for i in range(len(records))],
-        "url":   [""] * len(records),
+        "id": [str(i) for i in range(len(records))],
+        "url": [""] * len(records),
         "title": [r.get("subject", "") for r in records],
-        "text":  [r.get("src", "") + " " + r.get("pred", "") for r in records],
+        "text": [r.get("prompt", "") + " " + r.get("target_new", "") for r in records],
+    }
+    full_ds = Dataset.from_dict(data_dict)
+    split = full_ds.train_test_split(test_size=0.001, seed=69, shuffle=True)
+    split["val"] = split.pop("test")
+    return split
+
+
+def load_counterfact_ds(json_path="counterfact"):
+    print("[load_counterfact_ds]load counterfact ......")
+    import json as _json
+
+    data_dir = os.getenv("EDIT_DATA_DIR")
+    json_path = Path(json_path)
+    if json_path.suffix != ".json":
+        json_path = json_path.with_suffix(".json")
+    if not json_path.is_absolute():
+        json_path = Path(data_dir) / json_path
+    with json_path.open("r", encoding="utf-8") as handle:
+        records = _json.load(handle)
+
+    data_dict = {
+        "id": [str(i) for i in range(len(records))],
+        "url": [""] * len(records),
+        "title": [r.get("subject", "") for r in records],
+        "text": [r.get("prompt", "") + " " + r.get("target_new", "") for r in records],
     }
     full_ds = Dataset.from_dict(data_dict)
     split = full_ds.train_test_split(test_size=0.001, seed=69, shuffle=True)

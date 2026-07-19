@@ -223,7 +223,7 @@ def calculate_model_name(args, hparams):
         return name.replace('.', '_')
     else:
         name = (f"{args.model}_{args.alg_name}_{args.data_type}"
-                f"_{args.energy_threshold}_{hparams.mom2_n_samples}_{hparams.lr}_pro")
+                f"_{args.energy_threshold}_{hparams.mom2_n_samples}_{hparams.lr}")#_gen_19-23_1e-5_new")
 
     if args.sequential_edit:
         name += f"_sequential_{args.num_edits}"

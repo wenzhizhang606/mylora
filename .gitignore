@@ -27,3 +27,8 @@ Qwen2.5-7B-Instruct/
 AGENTS.md
 .codex/
 Meta-Llama-3-8B-Instruct.sf.bak/
+compare_npz_files.py
+run_7.sh
+run_8.sh
+logs.20260713.bak/
+logs_20260717/
