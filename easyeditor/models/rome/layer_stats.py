@@ -2,7 +2,7 @@ import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 from pathlib import Path
 import random
-from datasets import Dataset
+from datasets import Dataset, DatasetDict
 from typing import List
 
 import torch
@@ -44,7 +44,11 @@ def main():
         parser.add_argument(*args, **kwargs)
 
     aa("--model_name", default="gpt2-xl", choices=["gpt2-xl", "EleutherAI/gpt-j-6B"])
-    aa("--dataset", default="wikipedia", choices=["wikitext", "wikipedia"])
+    aa(
+        "--dataset",
+        default="wikipedia",
+        choices=["wikitext", "wikipedia"],
+    )
     aa("--layers", default=[17], type=lambda x: list(map(int, x.split(","))))
     aa("--to_collect", default=["mom2"], type=lambda x: x.split(","))
     aa("--sample_size", default=100000, type=lambda x: None if x == "all" else int(x))
@@ -177,7 +181,7 @@ def layer_stats(
     """
 
     def get_ds():
-        raw_ds = load_wiki_ds(ds_name)
+        raw_ds = load_stats_ds(ds_name)
         maxlen = get_max_length_from_model(model)
 
         if batch_tokens is not None and batch_tokens < maxlen:
@@ -257,7 +261,7 @@ def layer_stats_kfac(
     """
 
     def get_ds():
-        raw_ds = load_wiki_ds(ds_name)
+        raw_ds = load_stats_ds(ds_name)
         maxlen = get_max_length_from_model(model)
 
         if batch_tokens is not None and batch_tokens < maxlen:
@@ -1417,9 +1421,11 @@ def load_stats_ds(ds_name):
         return load_counterfact_ds(ds_name)
     if name in ("zsre", "zsre_mend_163k"):
         return load_zsre_ds(ds_name)
+    if name in ("wiki_big_edit_3k",):
+        return load_wikidemo_ds(ds_name)
     raise ValueError(
         f"Unsupported K-FAC dataset '{ds_name}'. Expected wikipedia, wikitext, "
-        "counterfact or zsre_mend_163k."
+        "counterfact, zsre_mend_163k or wikidemo."
     )
 
 
@@ -1469,6 +1475,42 @@ def load_counterfact_ds(json_path="counterfact"):
         "text": [r.get("prompt", "") + " " + r.get("target_new", "") for r in records],
     }
     full_ds = Dataset.from_dict(data_dict)
+    split = full_ds.train_test_split(test_size=0.001, seed=69, shuffle=True)
+    split["val"] = split.pop("test")
+    return split
+
+
+def load_wikidemo_ds(json_path="wiki_big_edit_3k"):
+    import json as _json
+
+    path = Path(json_path)
+    if path.suffix.lower() != ".json":
+        path = path.with_suffix(".json")
+
+    if not path.is_absolute():
+        data_dir = os.getenv("EDIT_DATA_DIR")
+        if data_dir:
+            path = Path(data_dir) / path
+        elif not path.exists():
+            path = Path("data") / path
+
+    print(f"[load_wikidemo_ds] loading {path}")
+    with path.open("r", encoding="utf-8") as handle:
+        records = _json.load(handle)
+
+    data_dict = {
+        "id": [str(i) for i in range(len(records))],
+        "url": [""] * len(records),
+        "title": [record.get("subject", "") for record in records],
+        "text": [
+            f"{record.get('prompt', '')} {record.get('target_new', '')}".strip()
+            for record in records
+        ],
+    }
+    full_ds = Dataset.from_dict(data_dict)
+    if len(full_ds) < 2:
+        return DatasetDict({"train": full_ds, "val": full_ds.select([])})
+
     split = full_ds.train_test_split(test_size=0.001, seed=69, shuffle=True)
     split["val"] = split.pop("test")
     return split
